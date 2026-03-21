@@ -1,6 +1,8 @@
 """Jobs API routes."""
 
+import json
 import logging
+import re
 import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,20 +24,86 @@ from app.schemas.job import (
 router = APIRouter()
 
 
+# --- helpers ---
+
+def _serialize_exclude_keywords(data: dict) -> dict:
+    """Convert exclude_keywords list to JSON string for DB storage."""
+    if "exclude_keywords" in data and data["exclude_keywords"] is not None:
+        data["exclude_keywords"] = json.dumps(data["exclude_keywords"])
+    return data
+
+
+def _profile_to_response(profile: SearchProfile) -> dict:
+    """Convert DB profile to response dict, parsing JSON fields."""
+    d = {c.key: getattr(profile, c.key) for c in profile.__table__.columns}
+    if d.get("exclude_keywords"):
+        try:
+            d["exclude_keywords"] = json.loads(d["exclude_keywords"])
+        except (json.JSONDecodeError, TypeError):
+            d["exclude_keywords"] = []
+    else:
+        d["exclude_keywords"] = None
+    return d
+
+
+def _extract_linkedin_job_id(url: str | None) -> str | None:
+    """Extract LinkedIn job ID from URL like /jobs/view/1234567890/"""
+    if not url:
+        return None
+    m = re.search(r"/jobs/view/(\d+)", url)
+    return m.group(1) if m else None
+
+
+def _is_duplicate(db: Session, job_data: dict) -> bool:
+    """Check if job already exists by linkedin_job_id, URL, or title+company."""
+    linkedin_id = job_data.get("linkedin_job_id")
+    if linkedin_id:
+        if db.query(Job).filter(Job.linkedin_job_id == linkedin_id).first():
+            return True
+
+    url = job_data.get("url")
+    if url:
+        if db.query(Job).filter(Job.url == url).first():
+            return True
+
+    # Fallback: same title + company = duplicate
+    title = job_data.get("title", "").strip().lower()
+    company = job_data.get("company", "").strip().lower()
+    if title and company:
+        existing = db.query(Job).filter(Job.title == job_data["title"], Job.company == job_data["company"]).first()
+        if existing:
+            return True
+
+    return False
+
+
+def _should_exclude(description: str | None, exclude_keywords: list[str]) -> str | None:
+    """Check if description contains any exclude keywords. Returns the matched keyword or None."""
+    if not description or not exclude_keywords:
+        return None
+    desc_lower = description.lower()
+    for kw in exclude_keywords:
+        if kw.lower() in desc_lower:
+            return kw
+    return None
+
+
 # --- Search Profiles ---
 
 @router.get("/search-profiles", response_model=list[SearchProfileResponse])
 def list_search_profiles(db: Session = Depends(get_db)):
-    return db.query(SearchProfile).order_by(SearchProfile.created_at.desc()).all()
+    profiles = db.query(SearchProfile).order_by(SearchProfile.created_at.desc()).all()
+    return [_profile_to_response(p) for p in profiles]
 
 
 @router.post("/search-profiles", response_model=SearchProfileResponse, status_code=201)
 def create_search_profile(payload: SearchProfileCreate, db: Session = Depends(get_db)):
-    profile = SearchProfile(**payload.model_dump())
+    data = _serialize_exclude_keywords(payload.model_dump())
+    profile = SearchProfile(**data)
     db.add(profile)
     db.commit()
     db.refresh(profile)
-    return profile
+    return _profile_to_response(profile)
 
 
 @router.put("/search-profiles/{profile_id}", response_model=SearchProfileResponse)
@@ -43,11 +111,12 @@ def update_search_profile(profile_id: str, payload: SearchProfileUpdate, db: Ses
     profile = db.query(SearchProfile).filter(SearchProfile.id == profile_id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Search profile not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = _serialize_exclude_keywords(payload.model_dump(exclude_unset=True))
+    for field, value in data.items():
         setattr(profile, field, value)
     db.commit()
     db.refresh(profile)
-    return profile
+    return _profile_to_response(profile)
 
 
 @router.delete("/search-profiles/{profile_id}", status_code=204)
@@ -57,39 +126,6 @@ def delete_search_profile(profile_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Search profile not found")
     db.delete(profile)
     db.commit()
-
-
-async def _run_profile(profile: SearchProfile, db: Session) -> dict:
-    """Run a single search profile and save results. Returns stats dict."""
-    from app.services import scraper
-    from datetime import datetime, timezone
-
-    jobs = await scraper.search_linkedin_jobs(
-        keywords=profile.keywords,
-        location=profile.location,
-        remote_type=profile.remote_type,
-        experience_level=profile.experience_level,
-    )
-
-    saved = []
-    for job_data in jobs:
-        if job_data.get("url"):
-            existing = db.query(Job).filter(Job.url == job_data["url"]).first()
-            if existing:
-                continue
-        job = Job(**job_data)
-        db.add(job)
-        saved.append(job)
-
-    profile.last_run_at = datetime.now(timezone.utc)
-    db.commit()
-
-    return {
-        "profile_id": profile.id,
-        "profile_name": profile.name,
-        "scraped": len(jobs),
-        "new_saved": len(saved),
-    }
 
 
 @router.post("/search-profiles/run-batch")
@@ -103,16 +139,29 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="No matching search profiles found")
 
     # Build search list for batch scraper
-    searches = [
-        {
+    searches = []
+    exclude_map: dict[str, list[str]] = {}  # profile_id -> exclude keywords
+    max_applicants_map: dict[str, int | None] = {}
+
+    for p in profiles:
+        exclude_kw = []
+        if p.exclude_keywords:
+            try:
+                exclude_kw = json.loads(p.exclude_keywords)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        exclude_map[p.id] = exclude_kw
+        max_applicants_map[p.id] = p.max_applicants
+
+        searches.append({
             "id": p.id,
             "keywords": p.keywords,
             "location": p.location,
             "remote_type": p.remote_type,
             "experience_level": p.experience_level,
-        }
-        for p in profiles
-    ]
+            "date_posted": p.date_posted,
+            "sort_by": p.sort_by,
+        })
 
     try:
         batch_results = await scraper.search_linkedin_jobs_batch(searches)
@@ -122,17 +171,40 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=502, detail=f"Scraper error: {error_msg}")
 
-    # Save results to DB
+    # Save results to DB with filtering
     results = []
     profile_map = {p.id: p for p in profiles}
     for pid, jobs_data in batch_results.items():
         profile = profile_map[pid]
+        exclude_kw = exclude_map.get(pid, [])
+        max_app = max_applicants_map.get(pid)
         saved = []
+        skipped_dup = 0
+        skipped_filter = 0
+
         for job_data in jobs_data:
-            if job_data.get("url"):
-                existing = db.query(Job).filter(Job.url == job_data["url"]).first()
-                if existing:
-                    continue
+            # Extract linkedin job ID for dedup
+            job_data["linkedin_job_id"] = _extract_linkedin_job_id(job_data.get("url"))
+
+            # Dedup check
+            if _is_duplicate(db, job_data):
+                skipped_dup += 1
+                continue
+
+            # Max applicants filter
+            app_count = job_data.get("applicant_count")
+            if max_app is not None and app_count is not None and app_count > max_app:
+                skipped_filter += 1
+                logger.info(f"  Skipped (applicants={app_count} > {max_app}): {job_data.get('title')}")
+                continue
+
+            # Exclude keywords filter
+            matched_kw = _should_exclude(job_data.get("description"), exclude_kw)
+            if matched_kw:
+                skipped_filter += 1
+                logger.info(f"  Skipped (matched '{matched_kw}'): {job_data.get('title')}")
+                continue
+
             job = Job(**job_data)
             db.add(job)
             saved.append(job)
@@ -143,7 +215,9 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
             "profile_name": profile.name,
             "scraped": len(jobs_data),
             "new_saved": len(saved),
-            "status": "ok" if jobs_data or True else "ok",
+            "skipped_duplicate": skipped_dup,
+            "skipped_filtered": skipped_filter,
+            "status": "ok",
         })
 
     db.commit()
@@ -155,11 +229,52 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
 
 @router.post("/search-profiles/{profile_id}/run")
 async def run_search(profile_id: str, db: Session = Depends(get_db)):
-    """Run a scraping job based on search profile."""
+    """Run a single search profile."""
+    from datetime import datetime, timezone
+    from app.services import scraper
+
     profile = db.query(SearchProfile).filter(SearchProfile.id == profile_id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Search profile not found")
-    return await _run_profile(profile, db)
+
+    jobs = await scraper.search_linkedin_jobs(
+        keywords=profile.keywords,
+        location=profile.location,
+        remote_type=profile.remote_type,
+        experience_level=profile.experience_level,
+        date_posted=profile.date_posted,
+        sort_by=profile.sort_by,
+    )
+
+    exclude_kw = []
+    if profile.exclude_keywords:
+        try:
+            exclude_kw = json.loads(profile.exclude_keywords)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    saved = []
+    for job_data in jobs:
+        job_data["linkedin_job_id"] = _extract_linkedin_job_id(job_data.get("url"))
+
+        if _is_duplicate(db, job_data):
+            continue
+
+        app_count = job_data.get("applicant_count")
+        if profile.max_applicants is not None and app_count is not None and app_count > profile.max_applicants:
+            continue
+
+        if _should_exclude(job_data.get("description"), exclude_kw):
+            continue
+
+        job = Job(**job_data)
+        db.add(job)
+        saved.append(job)
+
+    profile.last_run_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"scraped": len(jobs), "new_saved": len(saved)}
 
 
 # --- Jobs ---

@@ -139,6 +139,7 @@ export interface JobListItem {
   title: string;
   company: string;
   location: string | null;
+  applicant_count: number | null;
   match_score: number | null;
   status: string;
   scraped_at: string;
@@ -151,6 +152,10 @@ export interface SearchProfile {
   location: string | null;
   remote_type: string | null;
   experience_level: string | null;
+  date_posted: string | null;
+  sort_by: string | null;
+  max_applicants: number | null;
+  exclude_keywords: string[] | null;
   last_run_at: string | null;
   created_at: string;
 }
@@ -165,7 +170,7 @@ export const jobApi = {
   listProfiles: () => api.get<SearchProfile[]>('/jobs/search-profiles'),
   createProfile: (data: Omit<SearchProfile, 'id' | 'last_run_at' | 'created_at'>) =>
     api.post<SearchProfile>('/jobs/search-profiles', data),
-  updateProfile: (id: string, data: Partial<Pick<SearchProfile, 'name' | 'keywords' | 'location' | 'remote_type' | 'experience_level'>>) =>
+  updateProfile: (id: string, data: Partial<Pick<SearchProfile, 'name' | 'keywords' | 'location' | 'remote_type' | 'experience_level' | 'date_posted' | 'sort_by' | 'max_applicants' | 'exclude_keywords'>>) =>
     api.put<SearchProfile>(`/jobs/search-profiles/${id}`, data),
   deleteProfile: (id: string) => api.delete(`/jobs/search-profiles/${id}`),
   runSearch: (profileId: string) =>
@@ -246,6 +251,27 @@ export const generateApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+};
+
+// --- LLM Config APIs ---
+
+export interface LLMProvider {
+  id: string;
+  name: string;
+  model: string;
+  configured: boolean;
+}
+
+export interface LLMConfig {
+  provider: string;
+  model: string;
+  available_providers: LLMProvider[];
+}
+
+export const llmApi = {
+  getConfig: () => api.get<LLMConfig>('/llm/config'),
+  updateConfig: (data: { provider?: string; model?: string; api_key?: string; base_url?: string; max_tokens?: number }) =>
+    api.put<{ provider: string; model: string }>('/llm/config', data),
 };
 
 export default api;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Plus, Trash2, Play, Loader2, Sparkles, Check, X, Pencil } from 'lucide-react';
+import { Search, Plus, Trash2, Play, Loader2, Sparkles, Check, X, Pencil, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -10,15 +10,140 @@ import { useResumeStore } from '../stores/resumeStore';
 import { generateApi } from '../services/api';
 import type { SearchSuggestion } from '../services/api';
 
+interface ProfileFormState {
+  name: string;
+  keywords: string;
+  location: string;
+  remote_type: string;
+  experience_level: string;
+  date_posted: string;
+  sort_by: string;
+  max_applicants: string;
+  exclude_keywords: string;
+}
+
+const emptyForm: ProfileFormState = {
+  name: '', keywords: '', location: '', remote_type: '', experience_level: '',
+  date_posted: '', sort_by: '', max_applicants: '', exclude_keywords: '',
+};
+
+function formToPayload(form: ProfileFormState) {
+  return {
+    name: form.name,
+    keywords: form.keywords,
+    location: form.location || null,
+    remote_type: form.remote_type || null,
+    experience_level: form.experience_level || null,
+    date_posted: form.date_posted || null,
+    sort_by: form.sort_by || null,
+    max_applicants: form.max_applicants ? parseInt(form.max_applicants, 10) : null,
+    exclude_keywords: form.exclude_keywords
+      ? form.exclude_keywords.split(',').map((s) => s.trim()).filter(Boolean)
+      : null,
+  };
+}
+
+function ExperienceSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Any Level</option>
+      <option value="internship">Internship</option>
+      <option value="entry">Entry Level</option>
+      <option value="associate">Associate</option>
+      <option value="mid-senior">Mid-Senior</option>
+      <option value="director">Director</option>
+      <option value="executive">Executive</option>
+    </select>
+  );
+}
+
+function RemoteSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Any</option>
+      <option value="remote">Remote</option>
+      <option value="onsite">On-site</option>
+      <option value="hybrid">Hybrid</option>
+    </select>
+  );
+}
+
+function DatePostedSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Any Time</option>
+      <option value="24h">Past 24 Hours</option>
+      <option value="week">Past Week</option>
+      <option value="month">Past Month</option>
+    </select>
+  );
+}
+
+function SortSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm" value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Most Relevant</option>
+      <option value="recent">Most Recent</option>
+    </select>
+  );
+}
+
+/** Inline profile filter form fields (shared between create and edit) */
+function ProfileFilterFields({ form, setForm }: { form: ProfileFormState; setForm: (f: ProfileFormState) => void }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Profile Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g., ML Engineer Europe" />
+        <Input label="Keywords" value={form.keywords} onChange={(e) => setForm({ ...form, keywords: e.target.value })} placeholder="e.g., machine learning engineer" />
+        <Input label="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="e.g., Stockholm, Sweden" />
+        <div className="space-y-1">
+          <label className="block text-sm font-medium text-gray-700">Remote Type</label>
+          <RemoteSelect value={form.remote_type} onChange={(v) => setForm({ ...form, remote_type: v })} />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-sm font-medium text-gray-700">Experience Level</label>
+          <ExperienceSelect value={form.experience_level} onChange={(v) => setForm({ ...form, experience_level: v })} />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-sm font-medium text-gray-700">Date Posted</label>
+          <DatePostedSelect value={form.date_posted} onChange={(v) => setForm({ ...form, date_posted: v })} />
+        </div>
+        <div className="space-y-1">
+          <label className="block text-sm font-medium text-gray-700">Sort By</label>
+          <SortSelect value={form.sort_by} onChange={(v) => setForm({ ...form, sort_by: v })} />
+        </div>
+        <Input
+          label="Max Applicants"
+          type="number"
+          value={form.max_applicants}
+          onChange={(e) => setForm({ ...form, max_applicants: e.target.value })}
+          placeholder="e.g., 50"
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="block text-sm font-medium text-gray-700">Exclude Keywords (comma-separated)</label>
+        <input
+          className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+          value={form.exclude_keywords}
+          onChange={(e) => setForm({ ...form, exclude_keywords: e.target.value })}
+          placeholder="e.g., Swedish, 5 years experience, Senior"
+        />
+        <p className="text-xs text-gray-400">Jobs whose description contains any of these words will be excluded</p>
+      </div>
+    </>
+  );
+}
+
+
 export function JobList() {
   const {
     jobs, searchProfiles, scraping, analyzing,
-    fetchJobs, fetchProfiles, createProfile, updateProfile, deleteProfile, runSearch, runBatchSearches, batchAnalyze,
+    fetchJobs, fetchProfiles, createProfile, updateProfile, deleteProfile, deleteJob, runBatchSearches, batchAnalyze,
   } = useJobStore();
   const { resumes, fetchResumes } = useResumeStore();
 
   const [showNewProfile, setShowNewProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({ name: '', keywords: '', location: '', remote_type: '', experience_level: '' });
+  const [profileForm, setProfileForm] = useState<ProfileFormState>({ ...emptyForm });
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [searchText, setSearchText] = useState('');
 
@@ -28,6 +153,9 @@ export function JobList() {
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
   const [suggestionLocation, setSuggestionLocation] = useState('');
   const [suggestionRemote, setSuggestionRemote] = useState('');
+  const [suggestionDatePosted, setSuggestionDatePosted] = useState('week');
+  const [suggestionMaxApplicants, setSuggestionMaxApplicants] = useState('50');
+  const [suggestionExclude, setSuggestionExclude] = useState('');
   const [selectedResumeId, setSelectedResumeId] = useState('');
 
   // Profile selection state
@@ -35,7 +163,13 @@ export function JobList() {
 
   // Edit profile state
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', keywords: '', location: '', remote_type: '', experience_level: '' });
+  const [editForm, setEditForm] = useState<ProfileFormState>({ ...emptyForm });
+
+  // Scrape results
+  const [lastResults, setLastResults] = useState<{ total_scraped: number; total_saved: number; results: Array<{ profile_name: string; scraped: number; new_saved: number; skipped_duplicate: number; skipped_filtered: number; status: string }> } | null>(null);
+
+  // Job selection for batch delete
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchJobs();
@@ -55,7 +189,6 @@ export function JobList() {
     try {
       const { data } = await generateApi.suggestSearches(resumeId);
       setSuggestions(data.suggestions);
-      // Select all by default
       setSelectedSuggestions(new Set(data.suggestions.map((_, i) => i)));
     } catch (err: any) {
       alert(`AI suggestion failed: ${err?.response?.data?.detail || err.message}`);
@@ -74,6 +207,11 @@ export function JobList() {
   };
 
   const handleCreateFromSuggestions = async () => {
+    const excludeKw = suggestionExclude
+      ? suggestionExclude.split(',').map((s) => s.trim()).filter(Boolean)
+      : null;
+    const maxApp = suggestionMaxApplicants ? parseInt(suggestionMaxApplicants, 10) : null;
+
     for (const idx of selectedSuggestions) {
       const s = suggestions[idx];
       if (!s) continue;
@@ -83,6 +221,10 @@ export function JobList() {
         location: suggestionLocation || null,
         remote_type: suggestionRemote || null,
         experience_level: s.experience_level || null,
+        date_posted: suggestionDatePosted || null,
+        sort_by: null,
+        max_applicants: maxApp,
+        exclude_keywords: excludeKw,
       });
     }
     setSuggestions([]);
@@ -97,32 +239,24 @@ export function JobList() {
       location: profile.location || '',
       remote_type: profile.remote_type || '',
       experience_level: profile.experience_level || '',
+      date_posted: profile.date_posted || '',
+      sort_by: profile.sort_by || '',
+      max_applicants: profile.max_applicants?.toString() || '',
+      exclude_keywords: profile.exclude_keywords?.join(', ') || '',
     });
   };
 
   const handleSaveEdit = async () => {
     if (!editingProfileId || !editForm.name || !editForm.keywords) return;
-    await updateProfile(editingProfileId, {
-      name: editForm.name,
-      keywords: editForm.keywords,
-      location: editForm.location || null,
-      remote_type: editForm.remote_type || null,
-      experience_level: editForm.experience_level || null,
-    });
+    await updateProfile(editingProfileId, formToPayload(editForm));
     setEditingProfileId(null);
   };
 
   const handleCreateProfile = async () => {
     if (!profileForm.name || !profileForm.keywords) return;
-    await createProfile(profileForm);
-    setProfileForm({ name: '', keywords: '', location: '', remote_type: '', experience_level: '' });
+    await createProfile(formToPayload(profileForm));
+    setProfileForm({ ...emptyForm });
     setShowNewProfile(false);
-  };
-
-  const handleRunSearch = async (profileId: string) => {
-    const result = await runSearch(profileId);
-    alert(`Scraped ${result.scraped} jobs, ${result.new_saved} new saved`);
-    fetchJobs();
   };
 
   const toggleProfileSelection = (id: string) => {
@@ -145,14 +279,10 @@ export function JobList() {
   const handleRunSelected = async () => {
     const ids = [...selectedProfileIds];
     if (ids.length === 0) return;
+    setLastResults(null);
     try {
       const result = await runBatchSearches(ids);
-      const summary = result.results
-        .map((r: { profile_name: string; new_saved: number; status: string }) =>
-          `${r.profile_name}: ${r.new_saved} new${r.status !== 'ok' ? ` (${r.status})` : ''}`
-        )
-        .join('\n');
-      alert(`Total: ${result.total_scraped} scraped, ${result.total_saved} new saved\n\n${summary}`);
+      setLastResults(result);
       fetchJobs();
       fetchProfiles();
     } catch {
@@ -176,6 +306,17 @@ export function JobList() {
       j.title.toLowerCase().includes(searchText.toLowerCase()) ||
       j.company.toLowerCase().includes(searchText.toLowerCase())
     );
+
+  const formatProfileTags = (profile: typeof searchProfiles[0]) => {
+    const tags: string[] = [];
+    if (profile.location) tags.push(profile.location);
+    if (profile.remote_type) tags.push(profile.remote_type);
+    if (profile.experience_level) tags.push(profile.experience_level);
+    if (profile.date_posted) tags.push(`Posted: ${profile.date_posted}`);
+    if (profile.max_applicants) tags.push(`<${profile.max_applicants} applicants`);
+    if (profile.exclude_keywords?.length) tags.push(`Excludes: ${profile.exclude_keywords.join(', ')}`);
+    return tags;
+  };
 
   return (
     <div className="space-y-6">
@@ -224,6 +365,26 @@ export function JobList() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* Scrape Results */}
+          {lastResults && (
+            <div className="border border-green-200 bg-green-50/50 rounded-lg p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-green-800">
+                  Scrape Results: {lastResults.total_scraped} scraped, {lastResults.total_saved} new saved
+                </h3>
+                <button onClick={() => setLastResults(null)} className="text-green-400 hover:text-green-600">
+                  <X size={16} />
+                </button>
+              </div>
+              {lastResults.results.map((r, i) => (
+                <p key={i} className="text-xs text-green-700">
+                  <span className="font-medium">{r.profile_name}:</span>{' '}
+                  {r.new_saved} new, {r.skipped_duplicate} duplicates skipped, {r.skipped_filtered} filtered out
+                </p>
+              ))}
+            </div>
+          )}
+
           {/* AI Suggestions panel */}
           {(suggesting || suggestions.length > 0) && (
             <div className="border border-purple-200 bg-purple-50/50 rounded-lg p-4 space-y-3">
@@ -248,7 +409,7 @@ export function JobList() {
 
               {suggestions.length > 0 && (
                 <>
-                  {/* Location/remote for all suggestions */}
+                  {/* Shared filters for all suggestions */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="block text-xs font-medium text-gray-600">Location (for all)</label>
@@ -261,17 +422,31 @@ export function JobList() {
                     </div>
                     <div className="space-y-1">
                       <label className="block text-xs font-medium text-gray-600">Remote Type</label>
-                      <select
-                        className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
-                        value={suggestionRemote}
-                        onChange={(e) => setSuggestionRemote(e.target.value)}
-                      >
-                        <option value="">Any</option>
-                        <option value="remote">Remote</option>
-                        <option value="onsite">On-site</option>
-                        <option value="hybrid">Hybrid</option>
-                      </select>
+                      <RemoteSelect value={suggestionRemote} onChange={setSuggestionRemote} />
                     </div>
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-600">Date Posted</label>
+                      <DatePostedSelect value={suggestionDatePosted} onChange={setSuggestionDatePosted} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-600">Max Applicants</label>
+                      <input
+                        type="number"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                        value={suggestionMaxApplicants}
+                        onChange={(e) => setSuggestionMaxApplicants(e.target.value)}
+                        placeholder="e.g., 50"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-600">Exclude Keywords (comma-separated)</label>
+                    <input
+                      className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+                      value={suggestionExclude}
+                      onChange={(e) => setSuggestionExclude(e.target.value)}
+                      placeholder="e.g., Swedish, 5 years experience, Senior"
+                    />
                   </div>
 
                   {/* Suggestion list */}
@@ -328,22 +503,10 @@ export function JobList() {
             </div>
           )}
 
+          {/* Manual create form */}
           {showNewProfile && (
             <div className="border border-blue-100 bg-blue-50/50 rounded-lg p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <Input label="Profile Name" value={profileForm.name} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} placeholder="e.g., ML Engineer Europe" />
-                <Input label="Keywords" value={profileForm.keywords} onChange={(e) => setProfileForm({ ...profileForm, keywords: e.target.value })} placeholder="e.g., machine learning engineer" />
-                <Input label="Location" value={profileForm.location} onChange={(e) => setProfileForm({ ...profileForm, location: e.target.value })} placeholder="e.g., Stockholm, Sweden" />
-                <div className="space-y-1">
-                  <label className="block text-sm font-medium text-gray-700">Remote Type</label>
-                  <select className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" value={profileForm.remote_type} onChange={(e) => setProfileForm({ ...profileForm, remote_type: e.target.value })}>
-                    <option value="">Any</option>
-                    <option value="remote">Remote</option>
-                    <option value="onsite">On-site</option>
-                    <option value="hybrid">Hybrid</option>
-                  </select>
-                </div>
-              </div>
+              <ProfileFilterFields form={profileForm} setForm={setProfileForm} />
               <div className="flex gap-2">
                 <Button size="sm" onClick={handleCreateProfile}>Create</Button>
                 <Button size="sm" variant="ghost" onClick={() => setShowNewProfile(false)}>Cancel</Button>
@@ -365,18 +528,8 @@ export function JobList() {
               <div key={profile.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
                 {editingProfileId === profile.id ? (
                   /* Inline edit form */
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Profile name" />
-                      <input className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm" value={editForm.keywords} onChange={(e) => setEditForm({ ...editForm, keywords: e.target.value })} placeholder="Keywords" />
-                      <input className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm" value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} placeholder="Location" />
-                      <select className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm" value={editForm.remote_type} onChange={(e) => setEditForm({ ...editForm, remote_type: e.target.value })}>
-                        <option value="">Any Remote</option>
-                        <option value="remote">Remote</option>
-                        <option value="onsite">On-site</option>
-                        <option value="hybrid">Hybrid</option>
-                      </select>
-                    </div>
+                  <div className="space-y-3">
+                    <ProfileFilterFields form={editForm} setForm={setEditForm} />
                     <div className="flex gap-1">
                       <Button size="sm" onClick={handleSaveEdit}><Check size={14} className="mr-1" /> Save</Button>
                       <Button size="sm" variant="ghost" onClick={() => setEditingProfileId(null)}>Cancel</Button>
@@ -393,12 +546,22 @@ export function JobList() {
                         onChange={() => toggleProfileSelection(profile.id)}
                       />
                       <div>
-                      <p className="font-medium text-sm">{profile.name}</p>
-                      <p className="text-xs text-gray-500">
-                        {profile.keywords} | {profile.location || 'Any location'}
-                        {profile.remote_type && ` | ${profile.remote_type}`}
-                        {profile.last_run_at && ` | Last run: ${new Date(profile.last_run_at).toLocaleDateString()}`}
-                      </p>
+                        <p className="font-medium text-sm">{profile.name}</p>
+                        <p className="text-xs text-gray-500">
+                          Keywords: {profile.keywords}
+                        </p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {formatProfileTags(profile).map((tag, i) => (
+                            <span key={i} className="text-xs px-1.5 py-0.5 bg-gray-200 rounded text-gray-600">
+                              {tag}
+                            </span>
+                          ))}
+                          {profile.last_run_at && (
+                            <span className="text-xs px-1.5 py-0.5 bg-blue-100 rounded text-blue-600">
+                              Last run: {new Date(profile.last_run_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex gap-1">
@@ -418,7 +581,7 @@ export function JobList() {
         </CardContent>
       </Card>
 
-      {/* Filters */}
+      {/* Filters & Job Actions */}
       <div className="flex gap-3 items-center">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -441,6 +604,22 @@ export function JobList() {
           <option value="ignored">Ignored</option>
           <option value="rejected">Rejected</option>
         </select>
+        {selectedJobIds.size > 0 && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={async () => {
+              if (!confirm(`Delete ${selectedJobIds.size} selected job(s)?`)) return;
+              for (const jid of selectedJobIds) {
+                await deleteJob(jid);
+              }
+              setSelectedJobIds(new Set());
+            }}
+          >
+            <Trash2 size={14} className="mr-1 text-red-500" />
+            Delete {selectedJobIds.size}
+          </Button>
+        )}
       </div>
 
       {/* Job List Table */}
@@ -455,16 +634,49 @@ export function JobList() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-3 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    className="rounded"
+                    checked={selectedJobIds.size === filteredJobs.length && filteredJobs.length > 0}
+                    onChange={() => {
+                      if (selectedJobIds.size === filteredJobs.length) {
+                        setSelectedJobIds(new Set());
+                      } else {
+                        setSelectedJobIds(new Set(filteredJobs.map((j) => j.id)));
+                      }
+                    }}
+                  />
+                </th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Job Title</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Company</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Location</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">
+                  <Users size={14} className="inline mr-1" />Applicants
+                </th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Match</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Status</th>
+                <th className="px-3 py-3 w-8"></th>
               </tr>
             </thead>
             <tbody>
               {filteredJobs.map((job) => (
-                <tr key={job.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                <tr key={job.id} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${selectedJobIds.has(job.id) ? 'bg-blue-50/50' : ''}`}>
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={selectedJobIds.has(job.id)}
+                      onChange={() => {
+                        setSelectedJobIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(job.id)) next.delete(job.id);
+                          else next.add(job.id);
+                          return next;
+                        });
+                      }}
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <Link to={`/jobs/${job.id}`} className="text-blue-600 hover:underline font-medium">
                       {job.title}
@@ -472,8 +684,25 @@ export function JobList() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">{job.company}</td>
                   <td className="px-4 py-3 text-gray-500">{job.location}</td>
+                  <td className="px-4 py-3 text-center text-gray-500">
+                    {job.applicant_count != null ? job.applicant_count : '-'}
+                  </td>
                   <td className="px-4 py-3 text-center"><MatchScoreBadge score={job.match_score} /></td>
                   <td className="px-4 py-3 text-center"><StatusBadge status={job.status} /></td>
+                  <td className="px-3 py-3">
+                    <button
+                      className="text-gray-300 hover:text-red-500 transition-colors"
+                      title="Delete"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (confirm(`Delete "${job.title}" at ${job.company}?`)) {
+                          await deleteJob(job.id);
+                        }
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

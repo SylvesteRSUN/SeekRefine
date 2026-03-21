@@ -21,7 +21,7 @@ interface JobStore {
 
   fetchProfiles: () => Promise<void>;
   createProfile: (data: Omit<SearchProfile, 'id' | 'last_run_at' | 'created_at'>) => Promise<void>;
-  updateProfile: (id: string, data: Partial<Pick<SearchProfile, 'name' | 'keywords' | 'location' | 'remote_type' | 'experience_level'>>) => Promise<void>;
+  updateProfile: (id: string, data: Partial<Pick<SearchProfile, 'name' | 'keywords' | 'location' | 'remote_type' | 'experience_level' | 'date_posted' | 'sort_by' | 'max_applicants' | 'exclude_keywords'>>) => Promise<void>;
   deleteProfile: (id: string) => Promise<void>;
   runSearch: (profileId: string) => Promise<{ scraped: number; new_saved: number }>;
   runBatchSearches: (profileIds: string[]) => Promise<{ total_scraped: number; total_saved: number }>;

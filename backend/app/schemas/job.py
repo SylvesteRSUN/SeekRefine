@@ -11,6 +11,22 @@ class SearchProfileCreate(BaseModel):
     location: str | None = None
     remote_type: str | None = None  # "remote" | "onsite" | "hybrid"
     experience_level: str | None = None
+    date_posted: str | None = None  # "24h" | "week" | "month"
+    sort_by: str | None = None  # "relevant" | "recent"
+    max_applicants: int | None = None
+    exclude_keywords: list[str] | None = None  # ["Swedish", "5 years experience"]
+
+
+class SearchProfileUpdate(BaseModel):
+    name: str | None = None
+    keywords: str | None = None
+    location: str | None = None
+    remote_type: str | None = None
+    experience_level: str | None = None
+    date_posted: str | None = None
+    sort_by: str | None = None
+    max_applicants: int | None = None
+    exclude_keywords: list[str] | None = None
 
 
 class SearchProfileResponse(BaseModel):
@@ -20,6 +36,10 @@ class SearchProfileResponse(BaseModel):
     location: str | None
     remote_type: str | None
     experience_level: str | None
+    date_posted: str | None
+    sort_by: str | None
+    max_applicants: int | None
+    exclude_keywords: list[str] | None
     last_run_at: datetime | None
     created_at: datetime
 
@@ -29,6 +49,7 @@ class SearchProfileResponse(BaseModel):
 
 class JobResponse(BaseModel):
     id: str
+    linkedin_job_id: str | None
     title: str
     company: str
     location: str | None
@@ -37,6 +58,7 @@ class JobResponse(BaseModel):
     remote_type: str | None
     experience_level: str | None
     salary_range: str | None
+    applicant_count: int | None
     match_score: float | None
     match_analysis: dict | None
     status: str
@@ -52,20 +74,13 @@ class JobListItem(BaseModel):
     title: str
     company: str
     location: str | None
+    applicant_count: int | None
     match_score: float | None
     status: str
     scraped_at: datetime
 
     class Config:
         from_attributes = True
-
-
-class SearchProfileUpdate(BaseModel):
-    name: str | None = None
-    keywords: str | None = None
-    location: str | None = None
-    remote_type: str | None = None
-    experience_level: str | None = None
 
 
 class JobStatusUpdate(BaseModel):

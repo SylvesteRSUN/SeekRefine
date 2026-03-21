@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, FileText, Loader2, Download, Sparkles } from 'lucide-react';
+import { ArrowLeft, ExternalLink, FileText, Loader2, Download, Sparkles, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge, MatchScoreBadge, StatusBadge } from '../components/ui/Badge';
@@ -11,7 +11,7 @@ import { generateApi } from '../services/api';
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { currentJob, fetchJob, updateJobStatus, analyzeMatch } = useJobStore();
+  const { currentJob, fetchJob, updateJobStatus, deleteJob, analyzeMatch } = useJobStore();
   const { resumes, fetchResumes } = useResumeStore();
 
   const [analyzing, setAnalyzing] = useState(false);
@@ -90,6 +90,19 @@ export function JobDetail() {
               </Button>
             </a>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              if (!id) return;
+              if (confirm(`Delete this job?`)) {
+                await deleteJob(id);
+                navigate('/jobs');
+              }
+            }}
+          >
+            <Trash2 size={14} className="text-red-400" />
+          </Button>
         </div>
       </div>
 

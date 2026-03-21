@@ -5,6 +5,7 @@ import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useResumeStore } from '../stores/resumeStore';
 import { useJobStore } from '../stores/jobStore';
+import { LLMSettings } from '../components/LLMSettings';
 
 export function Dashboard() {
   const { resumes, fetchResumes } = useResumeStore();
@@ -76,6 +77,13 @@ export function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* LLM Provider */}
+      <Card>
+        <CardContent>
+          <LLMSettings />
+        </CardContent>
+      </Card>
 
       {/* Quick Actions */}
       <Card>
