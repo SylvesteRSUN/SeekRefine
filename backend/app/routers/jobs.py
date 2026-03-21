@@ -181,6 +181,7 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
         saved = []
         skipped_dup = 0
         skipped_filter = 0
+        unknown_applicants = 0
 
         for job_data in jobs_data:
             # Extract linkedin job ID for dedup
@@ -193,10 +194,14 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
 
             # Max applicants filter
             app_count = job_data.get("applicant_count")
-            if max_app is not None and app_count is not None and app_count > max_app:
-                skipped_filter += 1
-                logger.info(f"  Skipped (applicants={app_count} > {max_app}): {job_data.get('title')}")
-                continue
+            if max_app is not None:
+                if app_count is not None and app_count > max_app:
+                    skipped_filter += 1
+                    logger.info(f"  Skipped (applicants={app_count} > {max_app}): {job_data.get('title')}")
+                    continue
+                elif app_count is None:
+                    unknown_applicants += 1
+                    logger.debug(f"  Unknown applicant count, keeping: {job_data.get('title')}")
 
             # Exclude keywords filter
             matched_kw = _should_exclude(job_data.get("description"), exclude_kw)
@@ -208,6 +213,9 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
             job = Job(**job_data)
             db.add(job)
             saved.append(job)
+
+        if unknown_applicants > 0:
+            logger.info(f"  {unknown_applicants} jobs had unknown applicant count (kept anyway)")
 
         profile.last_run_at = datetime.now(timezone.utc)
         results.append({

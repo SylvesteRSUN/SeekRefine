@@ -27,7 +27,7 @@ interface JobStore {
   runBatchSearches: (profileIds: string[]) => Promise<{ total_scraped: number; total_saved: number }>;
 
   analyzeMatch: (resumeId: string, jobId: string) => Promise<MatchAnalysis>;
-  batchAnalyze: (resumeId: string) => Promise<void>;
+  batchAnalyze: (resumeId: string, jobIds?: string[], unscoredOnly?: boolean) => Promise<any>;
 
   clearError: () => void;
 }
@@ -159,13 +159,15 @@ export const useJobStore = create<JobStore>((set) => ({
     }
   },
 
-  batchAnalyze: async (resumeId: string) => {
+  batchAnalyze: async (resumeId: string, jobIds?: string[], unscoredOnly?: boolean) => {
     set({ analyzing: true, error: null });
     try {
-      await generateApi.batchAnalyze(resumeId);
+      const { data } = await generateApi.batchAnalyze(resumeId, jobIds, unscoredOnly);
       set({ analyzing: false });
+      return data;
     } catch (e: any) {
       set({ error: e.message, analyzing: false });
+      throw e;
     }
   },
 

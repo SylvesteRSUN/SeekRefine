@@ -5,6 +5,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -107,17 +108,33 @@ async def generate_cover_letter(payload: CoverLetterRequest, db: Session = Depen
     return CoverLetterResponse(id=cl.id, content=cl.content, style=cl.style)
 
 
+class BatchAnalyzeBody(BaseModel):
+    job_ids: list[str] | None = None
+    unscored_only: bool = True
+
+
 @router.post("/batch-analyze")
-async def batch_analyze(resume_id: str, db: Session = Depends(get_db)):
-    """Analyze all new (unscored) jobs against a resume."""
+async def batch_analyze(
+    resume_id: str,
+    body: BatchAnalyzeBody | None = None,
+    db: Session = Depends(get_db),
+):
+    """Analyze jobs against a resume. If job_ids given, analyze those; otherwise analyze unscored jobs."""
+    job_ids = body.job_ids if body else None
+    unscored_only = body.unscored_only if body else True
     resume = db.query(Resume).filter(Resume.id == resume_id).first()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
 
-    unscored_jobs = db.query(Job).filter(Job.match_score.is_(None)).all()
-    results = []
+    if job_ids:
+        target_jobs = db.query(Job).filter(Job.id.in_(job_ids)).all()
+    elif unscored_only:
+        target_jobs = db.query(Job).filter(Job.match_score.is_(None)).all()
+    else:
+        target_jobs = db.query(Job).all()
 
-    for job in unscored_jobs:
+    results = []
+    for job in target_jobs:
         try:
             result = await llm_service.match_analysis(
                 resume_json=json.dumps(resume.data, ensure_ascii=False),
@@ -125,9 +142,9 @@ async def batch_analyze(resume_id: str, db: Session = Depends(get_db)):
             )
             job.match_score = result.get("score", 0)
             job.match_analysis = result
-            results.append({"job_id": job.id, "score": job.match_score, "status": "ok"})
+            results.append({"job_id": job.id, "title": job.title, "score": job.match_score, "status": "ok"})
         except Exception as e:
-            results.append({"job_id": job.id, "score": None, "status": f"error: {str(e)}"})
+            results.append({"job_id": job.id, "title": job.title, "score": None, "status": f"error: {str(e)}"})
 
     db.commit()
     return {"analyzed": len(results), "results": results}

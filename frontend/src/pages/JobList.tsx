@@ -290,13 +290,38 @@ export function JobList() {
     }
   };
 
-  const handleBatchAnalyze = async () => {
-    if (resumes.length === 0) {
-      alert('Please create a resume first');
-      return;
-    }
-    await batchAnalyze(resumes[0].id);
-    fetchJobs();
+  const handleAnalyzeUnscored = async () => {
+    const resumeId = selectedResumeId || resumes[0]?.id;
+    if (!resumeId) { alert('Please create a resume first'); return; }
+    try {
+      const result = await batchAnalyze(resumeId);
+      alert(`Analyzed ${result.analyzed} unscored jobs`);
+      fetchJobs();
+    } catch { /* handled by store */ }
+  };
+
+  const handleAnalyzeSelected = async () => {
+    const resumeId = selectedResumeId || resumes[0]?.id;
+    if (!resumeId) { alert('Please create a resume first'); return; }
+    const ids = [...selectedJobIds];
+    if (ids.length === 0) return;
+    try {
+      const result = await batchAnalyze(resumeId, ids, false);
+      alert(`Analyzed ${result.analyzed} jobs`);
+      fetchJobs();
+      setSelectedJobIds(new Set());
+    } catch { /* handled by store */ }
+  };
+
+  const handleAnalyzeAll = async () => {
+    const resumeId = selectedResumeId || resumes[0]?.id;
+    if (!resumeId) { alert('Please create a resume first'); return; }
+    if (!confirm(`Re-analyze all ${jobs.length} jobs? This may take a while.`)) return;
+    try {
+      const result = await batchAnalyze(resumeId, undefined, false);
+      alert(`Analyzed ${result.analyzed} jobs`);
+      fetchJobs();
+    } catch { /* handled by store */ }
   };
 
   const filteredJobs = jobs
@@ -326,9 +351,18 @@ export function JobList() {
           <p className="text-gray-500 mt-1">{jobs.length} jobs found</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={handleBatchAnalyze} disabled={analyzing}>
-            {analyzing ? <Loader2 size={16} className="mr-2 animate-spin" /> : null}
-            Analyze All
+          {selectedJobIds.size > 0 && (
+            <Button variant="primary" size="sm" onClick={handleAnalyzeSelected} disabled={analyzing}>
+              {analyzing ? <Loader2 size={14} className="mr-1 animate-spin" /> : <Sparkles size={14} className="mr-1" />}
+              Analyze {selectedJobIds.size} Selected
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={handleAnalyzeUnscored} disabled={analyzing}>
+            {analyzing ? <Loader2 size={14} className="mr-1 animate-spin" /> : <Sparkles size={14} className="mr-1" />}
+            Analyze Unscored
+          </Button>
+          <Button variant="ghost" size="sm" onClick={handleAnalyzeAll} disabled={analyzing}>
+            Re-analyze All
           </Button>
         </div>
       </div>

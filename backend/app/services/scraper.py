@@ -104,13 +104,51 @@ def _ensure_logged_in(page) -> bool:
 
 
 def _extract_applicant_count(text: str | None) -> int | None:
-    """Parse applicant count from text like '23 applicants' or 'Over 100 applicants'."""
+    """Parse applicant count from text in English or Chinese LinkedIn UI.
+
+    Examples:
+      EN: "23 applicants", "Over 100 applicants", "Be among the first 25 applicants"
+      CN: "23位申请者", "52位会员点击了申请", "超过100位申请者", "成为前25位申请者之一"
+    """
     if not text:
         return None
-    # "Over 100 applicants" → 100
-    m = re.search(r"(?:over\s+)?(\d+)\s*applicant", text, re.IGNORECASE)
+
+    # --- Chinese patterns ---
+    # "52位申请者" / "52 位会员点击了申请" / "52位会员已申请"
+    m = re.search(r"(\d[\d,]*)\s*位(?:申请|会员|求职)", text)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    # "超过100位申请者" / "超过 100 人申请"
+    m = re.search(r"超过\s*(\d[\d,]*)\s*(?:位|人)", text)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    # "成为前25位申请者之一"
+    m = re.search(r"前\s*(\d[\d,]*)\s*位", text)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    # Broader: "XX人申请" / "XX人已申请"
+    m = re.search(r"(\d[\d,]*)\s*人(?:已)?申请", text)
+    if m:
+        return int(m.group(1).replace(",", ""))
+
+    # --- English patterns ---
+    # "Over 100 applicants" / "23 applicants"
+    m = re.search(r"(?:over\s+)?(\d[\d,]*)\s*applicant", text, re.IGNORECASE)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    # "Be among the first 25 applicants"
+    m = re.search(r"first\s+(\d+)\s*applicant", text, re.IGNORECASE)
     if m:
         return int(m.group(1))
+    # "X people clicked apply"
+    m = re.search(r"(\d[\d,]*)\s*(?:people|person)\s*(?:clicked|have)\s*appl", text, re.IGNORECASE)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    # Generic number near "appl"
+    m = re.search(r"(\d[\d,]*)\s*appl", text, re.IGNORECASE)
+    if m:
+        return int(m.group(1).replace(",", ""))
+
     return None
 
 
@@ -231,22 +269,49 @@ def _scrape_search(page, keywords, location, remote_type, experience_level,
                 except Exception:
                     pass
 
-                # Try to extract applicant count from detail panel
+                # Try to extract applicant count — multiple strategies
                 try:
-                    applicant_el = (
-                        page.query_selector(".jobs-unified-top-card__applicant-count")
-                        or page.query_selector(".jobs-unified-top-card__bullet")
-                        or page.query_selector("[class*='applicant']")
-                    )
-                    if applicant_el:
-                        applicant_count = _extract_applicant_count(applicant_el.inner_text())
+                    # Strategy 1: specific applicant selectors
+                    for sel in [
+                        ".jobs-unified-top-card__applicant-count",
+                        ".jobs-unified-top-card__bullet",
+                        "[class*='applicant']",
+                        ".job-details-jobs-unified-top-card__primary-description-container",
+                        ".tvm__text--low-emphasis",
+                    ]:
+                        el = page.query_selector(sel)
+                        if el:
+                            applicant_count = _extract_applicant_count(el.inner_text())
+                            if applicant_count is not None:
+                                break
 
-                    # Also try from the broader top card area
+                    # Strategy 2: scan the entire top card / detail header area
                     if applicant_count is None:
-                        top_card = page.query_selector(".jobs-unified-top-card")
-                        if top_card:
-                            top_text = top_card.inner_text()
-                            applicant_count = _extract_applicant_count(top_text)
+                        for sel in [
+                            ".jobs-unified-top-card",
+                            ".job-details-jobs-unified-top-card__container",
+                            ".jobs-details__main-content",
+                        ]:
+                            area = page.query_selector(sel)
+                            if area:
+                                applicant_count = _extract_applicant_count(area.inner_text())
+                                if applicant_count is not None:
+                                    break
+
+                    # Strategy 3: look in the card itself (some views show it inline)
+                    if applicant_count is None:
+                        card_text = card.inner_text()
+                        applicant_count = _extract_applicant_count(card_text)
+
+                    # Debug: log what text we found near applicant info
+                    if applicant_count is None:
+                        # Grab any text that might contain applicant info for debugging
+                        for debug_sel in [".jobs-unified-top-card", ".job-details-jobs-unified-top-card__container"]:
+                            debug_el = page.query_selector(debug_sel)
+                            if debug_el:
+                                debug_text = debug_el.inner_text()[:300]
+                                logger.debug(f"  Applicant debug ({debug_sel}): {debug_text!r}")
+                                break
                 except Exception:
                     pass
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Download, ArrowLeft, Plus, Trash2, ChevronDown, ChevronUp, MessageSquare } from 'lucide-react';
+import { Save, Download, ArrowLeft, Plus, Trash2, ChevronDown, ChevronUp, MessageSquare, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input, Textarea } from '../components/ui/Input';
@@ -79,7 +79,7 @@ export function ResumeEditor() {
     setData((prev) => {
       if (!prev) return prev;
       const clone = JSON.parse(JSON.stringify(prev));
-      (clone as any)[section] = [...(clone as any)[section], { ...template, id: crypto.randomUUID() }];
+      (clone as any)[section] = [{ ...template, id: crypto.randomUUID() }, ...(clone as any)[section]];
       return clone;
     });
   };
@@ -89,6 +89,18 @@ export function ResumeEditor() {
       if (!prev) return prev;
       const clone = JSON.parse(JSON.stringify(prev));
       (clone as any)[section].splice(index, 1);
+      return clone;
+    });
+  };
+
+  const moveItem = (section: string, index: number, direction: 'up' | 'down') => {
+    setData((prev) => {
+      if (!prev) return prev;
+      const clone = JSON.parse(JSON.stringify(prev));
+      const arr = (clone as any)[section];
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= arr.length) return prev;
+      [arr[index], arr[targetIndex]] = [arr[targetIndex], arr[index]];
       return clone;
     });
   };
@@ -167,7 +179,11 @@ export function ResumeEditor() {
             {data.education.map((edu, idx) => (
               <div key={edu.id || idx} className="border border-gray-100 rounded-lg p-4 space-y-3">
                 <div className="flex justify-between items-start">
-                  <span className="text-sm font-medium text-gray-500">#{idx + 1}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-gray-500">#{idx + 1}</span>
+                    <button onClick={() => moveItem('education', idx, 'up')} disabled={idx === 0} className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-20" title="Move up"><ArrowUpCircle size={16} /></button>
+                    <button onClick={() => moveItem('education', idx, 'down')} disabled={idx === data.education.length - 1} className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-20" title="Move down"><ArrowDownCircle size={16} /></button>
+                  </div>
                   <Button variant="ghost" size="sm" onClick={() => removeItem('education', idx)}>
                     <Trash2 size={14} className="text-red-400" />
                   </Button>
@@ -200,7 +216,11 @@ export function ResumeEditor() {
             {data.work_experience.map((work, idx) => (
               <div key={work.id || idx} className="border border-gray-100 rounded-lg p-4 space-y-3">
                 <div className="flex justify-between items-start">
-                  <span className="text-sm font-medium text-gray-500">#{idx + 1}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-gray-500">#{idx + 1}</span>
+                    <button onClick={() => moveItem('work_experience', idx, 'up')} disabled={idx === 0} className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-20" title="Move up"><ArrowUpCircle size={16} /></button>
+                    <button onClick={() => moveItem('work_experience', idx, 'down')} disabled={idx === data.work_experience.length - 1} className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-20" title="Move down"><ArrowDownCircle size={16} /></button>
+                  </div>
                   <Button variant="ghost" size="sm" onClick={() => removeItem('work_experience', idx)}>
                     <Trash2 size={14} className="text-red-400" />
                   </Button>
@@ -231,6 +251,8 @@ export function ResumeEditor() {
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-500">#{idx + 1}</span>
+                    <button onClick={() => moveItem('projects', idx, 'up')} disabled={idx === 0} className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-20" title="Move up"><ArrowUpCircle size={16} /></button>
+                    <button onClick={() => moveItem('projects', idx, 'down')} disabled={idx === data.projects.length - 1} className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-20" title="Move down"><ArrowDownCircle size={16} /></button>
                     {proj.tags.map((tag) => (
                       <Badge key={tag} variant="info">{tag}</Badge>
                     ))}
@@ -263,7 +285,11 @@ export function ResumeEditor() {
             {data.leadership.map((lead, idx) => (
               <div key={lead.id || idx} className="border border-gray-100 rounded-lg p-4 space-y-3">
                 <div className="flex justify-between items-start">
-                  <span className="text-sm font-medium text-gray-500">#{idx + 1}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-gray-500">#{idx + 1}</span>
+                    <button onClick={() => moveItem('leadership', idx, 'up')} disabled={idx === 0} className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-20" title="Move up"><ArrowUpCircle size={16} /></button>
+                    <button onClick={() => moveItem('leadership', idx, 'down')} disabled={idx === data.leadership.length - 1} className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-20" title="Move down"><ArrowDownCircle size={16} /></button>
+                  </div>
                   <Button variant="ghost" size="sm" onClick={() => removeItem('leadership', idx)}>
                     <Trash2 size={14} className="text-red-400" />
                   </Button>

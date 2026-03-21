@@ -233,8 +233,11 @@ export const generateApi = {
     api.post<TailoredResume>('/generate/tailor-resume', { resume_id, job_id }),
   coverLetter: (resume_id: string, job_id: string, style = 'professional') =>
     api.post<CoverLetter>('/generate/cover-letter', { resume_id, job_id, style }),
-  batchAnalyze: (resume_id: string) =>
-    api.post('/generate/batch-analyze', null, { params: { resume_id } }),
+  batchAnalyze: (resume_id: string, job_ids?: string[], unscored_only?: boolean) =>
+    api.post('/generate/batch-analyze', { job_ids: job_ids ?? null, unscored_only: unscored_only ?? true }, {
+      params: { resume_id },
+      timeout: 600000,
+    }),
   chat: (resume_id: string, message: string, history: ChatMessage[], fileContent?: string, fileName?: string) =>
     api.post<ChatResponse>('/generate/chat', {
       resume_id, message, history,
