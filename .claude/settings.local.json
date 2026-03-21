@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python -m playwright install chromium)",
+      "Bash(ls e:/SeekRefine/backend/.venv/Scripts/python*)",
+      "Bash(ls e:/SeekRefine/backend/.venv/Scripts/*.exe)",
+      "Bash(where python:*)",
+      "Bash(e:/SeekRefine/.venv/Scripts/python.exe --version)",
+      "Bash(e:/SeekRefine/.venv/Scripts/python.exe -m playwright install chromium)"
+    ]
+  }
+}

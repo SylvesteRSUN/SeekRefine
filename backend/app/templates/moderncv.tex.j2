@@ -1,0 +1,94 @@
+\documentclass[11pt,a4paper,sans]{moderncv}
+
+% Modern CV theme and colors
+\moderncvstyle{classic}
+\moderncvcolor{blue}
+
+% Character encoding and language
+\usepackage[utf8]{inputenc}
+\usepackage[scale=0.8,top=1.5cm,bottom=1.5cm]{geometry}
+
+% Reduce spacing in lists
+\usepackage{enumitem}
+\setlist{noitemsep,topsep=0pt}
+
+% Personal data
+\name{<< resume.personal_info.first_name >>}{<< resume.personal_info.last_name >>}
+<% if resume.personal_info.address %>\address{<< resume.personal_info.address >>}{}{}
+<% endif %><% if resume.personal_info.phone %>\phone[mobile]{<< resume.personal_info.phone >>}
+<% endif %><% if resume.personal_info.email %>\email{<< resume.personal_info.email | texsafe >>}
+<% endif %><% if resume.personal_info.linkedin %>\social[linkedin]{<< resume.personal_info.linkedin >>}
+<% endif %><% if resume.personal_info.github %>\social[github]{<< resume.personal_info.github >>}
+<% endif %>
+
+\begin{document}
+
+\makecvtitle
+
+<% if resume.education %>
+% EDUCATION SECTION
+\section{Education}
+<% for edu in resume.education %>
+
+\cventry{<< edu.dates >>}{<< edu.degree | texsafe >><% if edu.track %> (Track: << edu.track | texsafe >>)<% endif %>}{<< edu.school | texsafe >>}{<< edu.location | texsafe >>}{<< edu.grade | texsafe >>}
+{
+<% if edu.courses %>\textbf{Relevant Course:} << edu.courses | join(', ') | texsafe >>\\
+<% endif %><% if edu.thesis %>\textbf{Bachelor Thesis:} << edu.thesis | texsafe >>\\
+<% endif %><% if edu.honors %>\textbf{Honors:} << edu.honors | join('\\\\\\n') | texsafe >>
+<% endif %>}
+<% endfor %>
+<% endif %>
+
+<% if resume.work_experience %>
+% WORK EXPERIENCE SECTION
+\section{Relevant Work Experience}
+<% for work in resume.work_experience %>
+
+\cventry{<< work.dates >>}{<< work.title | texsafe >>}{<< work.company | texsafe >>}{<< work.location | texsafe >>}{}
+{
+<< work.description | texsafe >>
+}
+<% endfor %>
+<% endif %>
+
+<% if resume.projects %>
+% PROJECT EXPERIENCE SECTION
+\section{Relevant Project Experience}
+<% for proj in resume.projects %>
+
+\cventry{<< proj.dates >>}{<< proj.title | texsafe >>}{<< proj.context | texsafe >>}{}{}
+{
+<< proj.description | texsafe >>
+}
+<% endfor %>
+<% endif %>
+
+<% if resume.leadership %>
+% LEADERSHIP SECTION
+\section{Leadership \& Student Work Experience}
+<% for lead in resume.leadership %>
+
+\cventry{<< lead.dates >>}{<< lead.title | texsafe >>}{<< lead.organization | texsafe >>}{<< lead.parent_org | texsafe >>}{}
+{
+<< lead.description | texsafe >>
+}
+<% endfor %>
+<% endif %>
+
+<% if resume.skills %>
+% SKILLS SECTION
+\section{Technical Skills}
+<% for category, content in resume.skills.items() %>
+\cvitem{<< category | texsafe >>}{<< content | texsafe >>}
+<% endfor %>
+<% endif %>
+
+<% if resume.languages %>
+% LANGUAGES SECTION
+\section{Languages}
+<% for lang in resume.languages %>
+\cvitemwithcomment{<< lang.language >>}{<< lang.level >>}{<< lang.detail | texsafe >>}
+<% endfor %>
+<% endif %>
+
+\end{document}
