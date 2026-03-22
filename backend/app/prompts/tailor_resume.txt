@@ -1,17 +1,26 @@
-You are an expert resume optimizer. Given the original resume, job description, and match analysis, create a tailored version of the resume.
+You are an expert resume optimizer. Given the original resume, job description, and match analysis, create a highly targeted 2-page resume.
+
+CRITICAL LENGTH CONSTRAINT: The output must fit on exactly 2 pages (A4). Be ruthless about cutting irrelevant content.
 
 Your task:
-1. SELECT the 4-6 most relevant projects from the full list based on the job requirements
-2. REWRITE project descriptions to emphasize skills and achievements relevant to this job
-3. REORDER skills to put the most relevant ones first in each category
-4. ADJUST work experience descriptions to highlight relevant aspects
-5. Keep education and personal info unchanged
-6. Keep leadership section if relevant, remove if not
+1. PROJECTS: Select ONLY the 3-5 most relevant projects. Remove any project that does not directly relate to the job requirements. Shorten descriptions to 2-3 concise sentences each.
+2. WORK EXPERIENCE: Keep only roles directly relevant to the position. If a role (e.g., student union work, unrelated internships) adds no value for this specific job, REMOVE it entirely. Shorten remaining descriptions.
+3. EDUCATION: Keep all education entries but trim courses list to only the 4-6 most relevant courses. Remove irrelevant courses entirely.
+4. SKILLS: Consolidate and trim. Remove entire categories if irrelevant. Keep only skills that matter for this job. Aim for 3-4 skill categories maximum.
+5. LEADERSHIP: Remove entirely (set to empty array) unless directly relevant to the job.
+6. LANGUAGES: Keep as-is.
+7. PERSONAL INFO: Keep unchanged.
 
-Output ONLY valid JSON matching the exact same schema as the input resume. Do not add new projects or experiences - only select, reorder, and rewrite existing ones.
+OUTPUT FORMAT:
+- Output ONLY valid JSON matching the exact same schema as the input resume
+- For removed sections, use empty arrays []
+- Use COMPACT JSON (no pretty-printing, no unnecessary whitespace)
+- Keep descriptions SHORT: 1-3 sentences maximum per item
+- Do NOT wrap JSON in markdown code fences
 
 Important:
+- LESS IS MORE: a focused 2-page resume beats a 4-page one
 - Preserve factual accuracy - do not fabricate achievements or skills
 - Use keywords from the job description naturally
-- Keep descriptions concise and impactful
-- Maintain professional tone
+- Cut aggressively: if in doubt, leave it out
+- Reorder remaining items by relevance (most relevant first)

@@ -16,9 +16,10 @@ export function Dashboard() {
     fetchJobs();
   }, []);
 
-  const totalJobs = jobs.length;
-  const highMatchJobs = jobs.filter((j) => j.match_score !== null && j.match_score >= 70);
-  const appliedJobs = jobs.filter((j) => j.status === 'applied');
+  const activeJobs = jobs.filter((j) => j.status !== 'ignored');
+  const totalJobs = activeJobs.length;
+  const highMatchJobs = activeJobs.filter((j) => j.match_score !== null && j.match_score >= 70);
+  const appliedJobs = activeJobs.filter((j) => j.status === 'applied');
 
   return (
     <div className="space-y-6">
@@ -111,7 +112,7 @@ export function Dashboard() {
           <CardContent className="space-y-3">
             <h2 className="text-lg font-semibold">Top Matches</h2>
             <div className="space-y-2">
-              {highMatchJobs.slice(0, 5).map((job) => (
+              {[...highMatchJobs].sort((a, b) => (b.match_score ?? 0) - (a.match_score ?? 0)).slice(0, 5).map((job) => (
                 <Link
                   key={job.id}
                   to={`/jobs/${job.id}`}

@@ -6,10 +6,11 @@ AI-powered job search assistant. Supports multiple LLM providers (Ollama, OpenAI
 
 - **Resume Management** — Structured JSON editor mapped to moderncv LaTeX format. Import from LaTeX source, PDF, or Word files. Export as `.tex` for Overleaf.
 - **AI Chat Assistant** — Natural language resume editing with file upload support. Describe a project and the AI adds it to the right section.
-- **LinkedIn Job Scraping** — Playwright-based scraper with cookie persistence. AI generates search profiles from your resume with advanced filters (date posted, applicant count, keyword exclusion). Deduplication prevents re-adding the same jobs.
-- **Match Analysis** — LLM scores each job against your resume, highlighting matching points and gaps.
-- **Resume Tailoring** — Automatically selects relevant projects and rewrites descriptions for a target job.
-- **Cover Letter Generation** — Multiple styles (professional / enthusiastic / concise). LaTeX export.
+- **LinkedIn Job Scraping** — Playwright-based scraper with cookie persistence. AI generates search profiles from your resume with advanced filters (date posted, applicant count, keyword exclusion). Deduplication prevents re-adding the same jobs. Ignored jobs are hidden by default but still prevent re-scraping.
+- **Match Analysis** — LLM scores each job against your resume, highlighting matching points and gaps. Batch analyze unscored, selected, or all jobs.
+- **Resume Tailoring** — Generates a focused 2-page resume: selects 3-5 most relevant projects, trims irrelevant work experience and skills, rewrites descriptions with job keywords. Tailored versions are saved and viewable per job with LaTeX export.
+- **Cover Letter Generation** — Concise 1-page letters in multiple styles (professional / enthusiastic / concise). Previously generated letters are saved and accessible per job with copy/download.
+- **Job List Sorting** — Sort by match score (default, descending) or by applicant count (ascending). Ignored jobs hidden by default.
 - **Multi-LLM Support** — Switch between Ollama (local), OpenAI, Claude, Gemini, and DeepSeek at runtime from the Dashboard.
 
 ## Tech Stack
@@ -64,8 +65,8 @@ SEEKREFINE_LLM_PROVIDER=ollama
 # Ollama (local)
 SEEKREFINE_OLLAMA_MODEL=qwen3.5:9b
 SEEKREFINE_OLLAMA_BASE_URL=http://localhost:11434
-SEEKREFINE_OLLAMA_NUM_CTX=32768
-SEEKREFINE_OLLAMA_NUM_PREDICT=16384
+SEEKREFINE_OLLAMA_NUM_CTX=65536
+SEEKREFINE_OLLAMA_NUM_PREDICT=32768
 SEEKREFINE_OLLAMA_TIMEOUT=600
 
 # OpenAI

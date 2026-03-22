@@ -35,6 +35,30 @@ def create_resume(payload: ResumeCreate, db: Session = Depends(get_db)):
     return resume_service.create_resume(db, payload)
 
 
+@router.get("/tailored/{tailored_id}/export/latex")
+def export_tailored_latex(tailored_id: str, db: Session = Depends(get_db)):
+    """Export a tailored resume version as LaTeX source."""
+    from app.models.resume import TailoredResume
+    tailored = db.query(TailoredResume).filter(TailoredResume.id == tailored_id).first()
+    if not tailored:
+        raise HTTPException(status_code=404, detail="Tailored resume not found")
+    resume_data = ResumeData(**tailored.data)
+    latex_source = latex_service.render_resume_latex(resume_data)
+    filename = latex_service.generate_filename(resume_data)
+    return LaTeXExportResponse(latex_source=latex_source, filename=filename)
+
+
+@router.delete("/tailored/{tailored_id}", status_code=204)
+def delete_tailored(tailored_id: str, db: Session = Depends(get_db)):
+    """Delete a tailored resume version."""
+    from app.models.resume import TailoredResume
+    tailored = db.query(TailoredResume).filter(TailoredResume.id == tailored_id).first()
+    if not tailored:
+        raise HTTPException(status_code=404, detail="Tailored resume not found")
+    db.delete(tailored)
+    db.commit()
+
+
 @router.get("/{resume_id}", response_model=ResumeResponse)
 def get_resume(resume_id: str, db: Session = Depends(get_db)):
     resume = resume_service.get_resume(db, resume_id)

@@ -146,6 +146,7 @@ export function JobList() {
   const [profileForm, setProfileForm] = useState<ProfileFormState>({ ...emptyForm });
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [searchText, setSearchText] = useState('');
+  const [sortBy, setSortBy] = useState<'match' | 'applicants'>('match');
 
   // AI suggestion state
   const [suggesting, setSuggesting] = useState(false);
@@ -325,12 +326,26 @@ export function JobList() {
   };
 
   const filteredJobs = jobs
-    .filter((j) => !statusFilter || j.status === statusFilter)
+    .filter((j) => {
+      // Hide ignored jobs by default — only show them when explicitly filtering by "ignored"
+      if (!statusFilter && j.status === 'ignored') return false;
+      if (statusFilter && j.status !== statusFilter) return false;
+      return true;
+    })
     .filter((j) =>
       !searchText ||
       j.title.toLowerCase().includes(searchText.toLowerCase()) ||
       j.company.toLowerCase().includes(searchText.toLowerCase())
-    );
+    )
+    .sort((a, b) => {
+      if (sortBy === 'match') {
+        return (b.match_score ?? -1) - (a.match_score ?? -1);
+      }
+      // applicants: ascending (fewer first), nulls at end
+      const aCount = a.applicant_count ?? Infinity;
+      const bCount = b.applicant_count ?? Infinity;
+      return aCount - bCount;
+    });
 
   const formatProfileTags = (profile: typeof searchProfiles[0]) => {
     const tags: string[] = [];
@@ -348,7 +363,7 @@ export function JobList() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Jobs</h1>
-          <p className="text-gray-500 mt-1">{jobs.length} jobs found</p>
+          <p className="text-gray-500 mt-1">{jobs.filter(j => j.status !== 'ignored').length} active jobs ({jobs.length} total)</p>
         </div>
         <div className="flex gap-2">
           {selectedJobIds.size > 0 && (
@@ -631,12 +646,20 @@ export function JobList() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
-          <option value="">All Status</option>
+          <option value="">Active (excl. Ignored)</option>
           <option value="new">New</option>
           <option value="interested">Interested</option>
           <option value="applied">Applied</option>
           <option value="ignored">Ignored</option>
           <option value="rejected">Rejected</option>
+        </select>
+        <select
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as 'match' | 'applicants')}
+        >
+          <option value="match">Sort: Match Score</option>
+          <option value="applicants">Sort: Fewest Applicants</option>
         </select>
         {selectedJobIds.size > 0 && (
           <Button
@@ -685,10 +708,18 @@ export function JobList() {
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Job Title</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Company</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Location</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">
-                  <Users size={14} className="inline mr-1" />Applicants
+                <th
+                  className="text-center px-4 py-3 font-medium text-gray-600 cursor-pointer hover:text-blue-600 select-none"
+                  onClick={() => setSortBy('applicants')}
+                >
+                  <Users size={14} className="inline mr-1" />Applicants {sortBy === 'applicants' && '↑'}
                 </th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Match</th>
+                <th
+                  className="text-center px-4 py-3 font-medium text-gray-600 cursor-pointer hover:text-blue-600 select-none"
+                  onClick={() => setSortBy('match')}
+                >
+                  Match {sortBy === 'match' && '↓'}
+                </th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Status</th>
                 <th className="px-3 py-3 w-8"></th>
               </tr>

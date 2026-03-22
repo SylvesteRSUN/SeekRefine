@@ -167,6 +167,8 @@ export const jobApi = {
   updateStatus: (id: string, status: string) =>
     api.patch<Job>(`/jobs/${id}/status`, { status }),
   delete: (id: string) => api.delete(`/jobs/${id}`),
+  listCoverLetters: (jobId: string) =>
+    api.get<Array<{ id: string; content: string; style: string; created_at: string }>>(`/jobs/${jobId}/cover-letters`),
   listProfiles: () => api.get<SearchProfile[]>('/jobs/search-profiles'),
   createProfile: (data: Omit<SearchProfile, 'id' | 'last_run_at' | 'created_at'>) =>
     api.post<SearchProfile>('/jobs/search-profiles', data),
@@ -225,6 +227,10 @@ export interface SearchSuggestion {
 }
 
 export const generateApi = {
+  listTailored: (resumeId: string) =>
+    api.get<TailoredResume[]>(`/resumes/${resumeId}/tailored`),
+  exportTailoredLatex: (resumeId: string) =>
+    api.get<{ latex_source: string; filename: string }>(`/resumes/${resumeId}/export/latex`),
   suggestSearches: (resume_id: string) =>
     api.post<{ suggestions: SearchSuggestion[] }>('/generate/suggest-searches', { resume_id }, { timeout: 600000 }),
   matchAnalysis: (resume_id: string, job_id: string) =>

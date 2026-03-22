@@ -55,11 +55,19 @@ def _ollama_options(temperature: float = 0.7) -> dict:
     }
 
 
+def _strip_think_blocks(text: str) -> str:
+    """Remove <think>...</think> blocks from Qwen3 thinking mode output."""
+    import re
+    return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
+
+
 async def _ollama_generate(prompt: str, system: str, temperature: float) -> str:
     full_response = ""
     token_count = 0
+    think_count = 0
     done_reason = None
     final_stats = {}
+    in_think_block = False
 
     print("\n>>> LLM Output (Ollama): ", end="", flush=True)
 
@@ -86,17 +94,42 @@ async def _ollama_generate(prompt: str, system: str, temperature: float) -> str:
                     token_text = chunk["response"]
                     full_response += token_text
                     token_count += 1
-                    print(token_text, end="", flush=True)
+
+                    # Track thinking tokens for logging
+                    if "<think>" in token_text:
+                        in_think_block = True
+                    if in_think_block:
+                        think_count += 1
+                        # Print a dot for each 20 thinking tokens to show progress
+                        if think_count % 20 == 0:
+                            print(".", end="", flush=True)
+                    else:
+                        print(token_text, end="", flush=True)
+                    if "</think>" in token_text:
+                        in_think_block = False
+                        print(f"\n[Thinking: {think_count} tokens] ", end="", flush=True)
+
                 if chunk.get("done"):
                     done_reason = chunk.get("done_reason")
                     final_stats = chunk
 
-    print(f"\n<<< Done ({token_count} tokens)\n")
+    print(f"\n<<< Done ({token_count} tokens, {think_count} thinking)\n")
 
     if done_reason == "length":
-        logger.warning("!!! Response TRUNCATED (hit num_predict limit) !!!")
+        logger.warning(f"!!! Response TRUNCATED (hit num_predict limit) !!! "
+                       f"Total: {token_count} tokens, Thinking: {think_count} tokens")
+        raise _TruncatedError(full_response)
 
-    return full_response
+    # Strip thinking blocks from the final response
+    cleaned = _strip_think_blocks(full_response)
+    return cleaned
+
+
+class _TruncatedError(Exception):
+    """Raised when Ollama output is truncated by num_predict limit."""
+    def __init__(self, partial_response: str):
+        self.partial_response = partial_response
+        super().__init__("LLM output truncated")
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +322,23 @@ async def generate(prompt: str, system: str = "", temperature: float = 0.7) -> s
             )
         else:
             raise ValueError(f"Unknown LLM provider: {provider}")
+    except _TruncatedError as te:
+        # Ollama truncated - retry once with doubled num_predict
+        partial = _strip_think_blocks(te.partial_response)
+        if provider == "ollama":
+            logger.warning("Retrying Ollama with doubled num_predict...")
+            original_np = settings.ollama_num_predict
+            settings.ollama_num_predict = min(original_np * 2, settings.ollama_num_ctx)
+            try:
+                result = await _ollama_generate(prompt, system, temperature)
+            except _TruncatedError as te2:
+                # Still truncated - return what we have and let caller handle it
+                logger.error("Still truncated after retry, returning partial response")
+                result = _strip_think_blocks(te2.partial_response)
+            finally:
+                settings.ollama_num_predict = original_np
+        else:
+            result = partial
     except httpx.TimeoutException:
         elapsed = time.time() - start_time
         logger.error(f"LLM TIMEOUT after {elapsed:.1f}s")
@@ -305,32 +355,104 @@ async def generate(prompt: str, system: str = "", temperature: float = 0.7) -> s
 
 
 async def generate_json(prompt: str, system: str = "", temperature: float = 0.3) -> dict | list:
-    """Call LLM and parse JSON from response."""
-    full_response = await generate(prompt, system, temperature)
+    """Call LLM and parse JSON from response.
+
+    For Qwen3 models on Ollama, appends /no_think to disable thinking mode
+    so output tokens are spent on the actual JSON, not chain-of-thought.
+    """
+    # Disable thinking for JSON tasks — thinking wastes output tokens
+    actual_prompt = prompt
+    if settings.llm_provider == "ollama" and "qwen" in settings.ollama_model.lower():
+        actual_prompt = prompt + "\n/no_think"
+
+    full_response = await generate(actual_prompt, system, temperature)
+
+    if not full_response.strip():
+        raise ValueError("LLM returned empty response. The input may be too long for the model's context window.")
 
     # Try to extract JSON from the response
-    json_match = None
+    json_text = None
     if "```json" in full_response:
         start = full_response.index("```json") + 7
-        end = full_response.index("```", start)
-        json_match = full_response[start:end].strip()
+        end_idx = full_response.find("```", start)
+        json_text = full_response[start:end_idx].strip() if end_idx != -1 else full_response[start:].strip()
     elif "```" in full_response:
         start = full_response.index("```") + 3
-        end = full_response.index("```", start)
-        json_match = full_response[start:end].strip()
+        end_idx = full_response.find("```", start)
+        json_text = full_response[start:end_idx].strip() if end_idx != -1 else full_response[start:].strip()
     else:
-        json_match = full_response.strip()
+        json_text = full_response.strip()
 
+    # First attempt: direct parse
     try:
-        return json.loads(json_match)
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON PARSE ERROR: {e}")
-        logger.error(f"Attempted to parse ({len(json_match)} chars):")
-        logger.error(json_match[:1000] if json_match else "(empty)")
-        raise ValueError(
-            f"LLM returned invalid JSON. Parse error: {e}. "
-            f"Response length: {len(full_response)} chars."
-        ) from e
+        return json.loads(json_text)
+    except json.JSONDecodeError:
+        pass
+
+    # Second attempt: try to repair truncated JSON by closing brackets
+    repaired = _try_repair_json(json_text)
+    if repaired is not None:
+        logger.warning("JSON was truncated but successfully repaired")
+        return repaired
+
+    logger.error(f"JSON PARSE ERROR after repair attempt")
+    logger.error(f"Attempted to parse ({len(json_text)} chars):")
+    logger.error(json_text[:1000] if json_text else "(empty)")
+    raise ValueError(
+        f"LLM returned invalid JSON. Response length: {len(full_response)} chars. "
+        f"The model's output may have been truncated. Try using a larger model or reducing input size."
+    )
+
+
+def _try_repair_json(text: str) -> dict | list | None:
+    """Try to repair truncated JSON by closing open brackets/braces."""
+    if not text:
+        return None
+
+    # Find the last valid position and determine what needs closing
+    # Try progressively shorter substrings
+    for cutoff in range(len(text), max(len(text) - 200, 0), -1):
+        candidate = text[:cutoff]
+        # Count open/close brackets
+        opens = []
+        in_string = False
+        escape_next = False
+        for ch in candidate:
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\':
+                escape_next = True
+                continue
+            if ch == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch in ('{', '['):
+                opens.append(ch)
+            elif ch == '}' and opens and opens[-1] == '{':
+                opens.pop()
+            elif ch == ']' and opens and opens[-1] == '[':
+                opens.pop()
+
+        # Close any remaining open brackets
+        closing = ""
+        for bracket in reversed(opens):
+            closing += '}' if bracket == '{' else ']'
+
+        if closing:
+            try:
+                return json.loads(candidate + closing)
+            except json.JSONDecodeError:
+                continue
+        else:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+
+    return None
 
 
 # ---------------------------------------------------------------------------

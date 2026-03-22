@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, FileText, Loader2, Download, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, ExternalLink, FileText, Loader2, Download, Sparkles, Trash2, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge, MatchScoreBadge, StatusBadge } from '../components/ui/Badge';
 import { useJobStore } from '../stores/jobStore';
 import { useResumeStore } from '../stores/resumeStore';
-import { generateApi } from '../services/api';
+import { generateApi, type TailoredResume } from '../services/api';
+import api from '../services/api';
+
+interface CoverLetterItem {
+  id: string;
+  content: string;
+  style: string;
+  created_at: string;
+}
 
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
@@ -17,12 +25,48 @@ export function JobDetail() {
   const [analyzing, setAnalyzing] = useState(false);
   const [tailoring, setTailoring] = useState(false);
   const [generatingCL, setGeneratingCL] = useState(false);
-  const [coverLetter, setCoverLetter] = useState<string | null>(null);
+
+  // Previously generated items
+  const [tailoredResumes, setTailoredResumes] = useState<TailoredResume[]>([]);
+  const [coverLetters, setCoverLetters] = useState<CoverLetterItem[]>([]);
+  const [expandedTailored, setExpandedTailored] = useState<string | null>(null);
+  const [expandedCL, setExpandedCL] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) fetchJob(id);
     fetchResumes();
   }, [id]);
+
+  // Load existing tailored resumes and cover letters
+  useEffect(() => {
+    if (!id) return;
+    loadCoverLetters();
+  }, [id]);
+
+  useEffect(() => {
+    const resumeId = resumes[0]?.id;
+    if (!resumeId) return;
+    loadTailoredResumes(resumeId);
+  }, [resumes]);
+
+  const loadTailoredResumes = async (resumeId: string) => {
+    try {
+      const { data } = await api.get<TailoredResume[]>(`/resumes/${resumeId}/tailored`);
+      // Filter to only show ones for this job
+      setTailoredResumes(data.filter(t => t.job_id === id));
+    } catch {
+      // ignore
+    }
+  };
+
+  const loadCoverLetters = async () => {
+    try {
+      const { data } = await api.get<CoverLetterItem[]>(`/jobs/${id}/cover-letters`);
+      setCoverLetters(data);
+    } catch {
+      // ignore
+    }
+  };
 
   if (!currentJob) {
     return <p className="text-gray-400 text-center py-12">Loading...</p>;
@@ -45,8 +89,8 @@ export function JobDetail() {
     if (!resumeId || !id) return;
     setTailoring(true);
     try {
-      await generateApi.tailorResume(resumeId, id);
-      alert('Tailored resume created! Check your resume versions.');
+      const { data } = await generateApi.tailorResume(resumeId, id);
+      setTailoredResumes(prev => [data, ...prev]);
     } finally {
       setTailoring(false);
     }
@@ -57,10 +101,57 @@ export function JobDetail() {
     setGeneratingCL(true);
     try {
       const { data } = await generateApi.coverLetter(resumeId, id);
-      setCoverLetter(data.content);
+      const newCL: CoverLetterItem = {
+        id: data.id,
+        content: data.content,
+        style: data.style,
+        created_at: new Date().toISOString(),
+      };
+      setCoverLetters(prev => [newCL, ...prev]);
     } finally {
       setGeneratingCL(false);
     }
+  };
+
+  const handleExportTailoredLatex = async (tailoredId: string) => {
+    try {
+      const { data } = await api.get<{ latex_source: string; filename: string }>(
+        `/resumes/tailored/${tailoredId}/export/latex`
+      );
+      const blob = new Blob([data.latex_source], { type: 'application/x-tex' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = data.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Failed to export LaTeX');
+    }
+  };
+
+  const handleDeleteTailored = async (tailoredId: string) => {
+    if (!confirm('Delete this tailored resume version?')) return;
+    try {
+      await api.delete(`/resumes/tailored/${tailoredId}`);
+      setTailoredResumes(prev => prev.filter(t => t.id !== tailoredId));
+    } catch {
+      alert('Failed to delete');
+    }
+  };
+
+  const handleDownloadCL = (cl: CoverLetterItem) => {
+    const blob = new Blob([cl.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `CoverLetter_${currentJob.company}_${cl.style}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyCL = async (content: string) => {
+    await navigator.clipboard.writeText(content);
   };
 
   const analysis = currentJob.match_analysis;
@@ -121,7 +212,7 @@ export function JobDetail() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Job Description */}
+        {/* Job Description + Generated Content */}
         <div className="lg:col-span-2 space-y-6">
           <Card>
             <CardHeader>
@@ -134,26 +225,128 @@ export function JobDetail() {
             </CardContent>
           </Card>
 
-          {/* Cover Letter */}
-          {coverLetter && (
+          {/* Tailored Resumes */}
+          {tailoredResumes.length > 0 && (
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <h2 className="font-semibold">Generated Cover Letter</h2>
-                <Button size="sm" variant="secondary" onClick={() => {
-                  const blob = new Blob([coverLetter], { type: 'text/plain' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `CoverLetter_${currentJob.company}.txt`;
-                  a.click();
-                }}>
-                  <Download size={14} className="mr-1" /> Download
-                </Button>
+              <CardHeader>
+                <h2 className="font-semibold">Tailored Resumes ({tailoredResumes.length})</h2>
               </CardHeader>
-              <CardContent>
-                <div className="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed">
-                  {coverLetter}
-                </div>
+              <CardContent className="space-y-3">
+                {tailoredResumes.map((tr) => (
+                  <div key={tr.id} className="border border-gray-200 rounded-lg">
+                    <div
+                      className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50"
+                      onClick={() => setExpandedTailored(expandedTailored === tr.id ? null : tr.id)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <FileText size={14} className="text-blue-500" />
+                        <span className="text-sm font-medium">{tr.changes_summary || 'Tailored version'}</span>
+                        <span className="text-xs text-gray-400">
+                          {new Date(tr.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => { e.stopPropagation(); handleExportTailoredLatex(tr.id); }}
+                          title="Export LaTeX"
+                        >
+                          <Download size={14} />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteTailored(tr.id); }}
+                          title="Delete"
+                        >
+                          <Trash2 size={14} className="text-red-400" />
+                        </Button>
+                        {expandedTailored === tr.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </div>
+                    </div>
+                    {expandedTailored === tr.id && (
+                      <div className="p-3 pt-0 border-t border-gray-100">
+                        <div className="text-xs space-y-2 text-gray-600">
+                          {/* Show selected projects */}
+                          {tr.data.projects.length > 0 && (
+                            <div>
+                              <span className="font-semibold text-gray-700">Projects ({tr.data.projects.length}):</span>
+                              <ul className="mt-1 space-y-1">
+                                {tr.data.projects.map((p) => (
+                                  <li key={p.id} className="flex items-start gap-1">
+                                    <span className="text-blue-400 mt-0.5">-</span>
+                                    <span><strong>{p.title}</strong> — {p.context}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {/* Show skills summary */}
+                          {Object.keys(tr.data.skills).length > 0 && (
+                            <div>
+                              <span className="font-semibold text-gray-700">Skills:</span>{' '}
+                              {Object.keys(tr.data.skills).join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Cover Letters */}
+          {coverLetters.length > 0 && (
+            <Card>
+              <CardHeader>
+                <h2 className="font-semibold">Cover Letters ({coverLetters.length})</h2>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {coverLetters.map((cl) => (
+                  <div key={cl.id} className="border border-gray-200 rounded-lg">
+                    <div
+                      className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50"
+                      onClick={() => setExpandedCL(expandedCL === cl.id ? null : cl.id)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <FileText size={14} className="text-green-500" />
+                        <span className="text-sm font-medium capitalize">{cl.style} Cover Letter</span>
+                        <span className="text-xs text-gray-400">
+                          {new Date(cl.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => { e.stopPropagation(); handleCopyCL(cl.content); }}
+                          title="Copy to clipboard"
+                        >
+                          <Copy size={14} />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => { e.stopPropagation(); handleDownloadCL(cl); }}
+                          title="Download"
+                        >
+                          <Download size={14} />
+                        </Button>
+                        {expandedCL === cl.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </div>
+                    </div>
+                    {expandedCL === cl.id && (
+                      <div className="p-3 pt-0 border-t border-gray-100">
+                        <div className="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto">
+                          {cl.content}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </CardContent>
             </Card>
           )}

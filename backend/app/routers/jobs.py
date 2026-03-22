@@ -327,3 +327,10 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Job not found")
     db.delete(job)
     db.commit()
+
+
+@router.get("/{job_id}/cover-letters")
+def list_cover_letters(job_id: str, db: Session = Depends(get_db)):
+    from app.models.cover_letter import CoverLetter
+    letters = db.query(CoverLetter).filter(CoverLetter.job_id == job_id).order_by(CoverLetter.created_at.desc()).all()
+    return [{"id": cl.id, "content": cl.content, "style": cl.style, "created_at": str(cl.created_at)} for cl in letters]

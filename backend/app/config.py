@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3.5:9b"
     ollama_timeout: int = 600  # 10 minutes - large resumes need time
-    ollama_num_ctx: int = 32768  # Context window size (input + output)
-    ollama_num_predict: int = 16384  # Max output tokens
+    ollama_num_ctx: int = 65536  # Context window size (input + output)
+    ollama_num_predict: int = 32768  # Max output tokens
 
     # OpenAI-compatible (also used for DeepSeek)
     openai_api_key: str = ""
