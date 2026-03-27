@@ -169,6 +169,7 @@ export const jobApi = {
   delete: (id: string) => api.delete(`/jobs/${id}`),
   listCoverLetters: (jobId: string) =>
     api.get<Array<{ id: string; content: string; style: string; created_at: string }>>(`/jobs/${jobId}/cover-letters`),
+  importByUrl: (url: string) => api.post<Job>('/jobs/import-url', { url }),
   listProfiles: () => api.get<SearchProfile[]>('/jobs/search-profiles'),
   createProfile: (data: Omit<SearchProfile, 'id' | 'last_run_at' | 'created_at'>) =>
     api.post<SearchProfile>('/jobs/search-profiles', data),
@@ -260,6 +261,24 @@ export const generateApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+};
+
+// --- Follow-Up Chat APIs ---
+
+export interface FollowUpMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
+export const followUpApi = {
+  getMessages: (jobId: string) =>
+    api.get<FollowUpMessage[]>(`/generate/followup/${jobId}/messages`),
+  sendMessage: (jobId: string, message: string) =>
+    api.post<{ reply: string }>(`/generate/followup/${jobId}/chat`, { job_id: jobId, message }),
+  clearMessages: (jobId: string) =>
+    api.delete(`/generate/followup/${jobId}/messages`),
 };
 
 // --- LLM Config APIs ---

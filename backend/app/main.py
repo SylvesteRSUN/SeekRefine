@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.database import init_db
+from app.models import followup as _followup_models  # noqa: F401 — ensure table created
 from app.routers import generate, jobs, resume
 
 # Configure logging - show LLM activity in console

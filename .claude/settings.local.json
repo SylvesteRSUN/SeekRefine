@@ -6,7 +6,13 @@
       "Bash(ls e:/SeekRefine/backend/.venv/Scripts/*.exe)",
       "Bash(where python:*)",
       "Bash(e:/SeekRefine/.venv/Scripts/python.exe --version)",
-      "Bash(e:/SeekRefine/.venv/Scripts/python.exe -m playwright install chromium)"
+      "Bash(e:/SeekRefine/.venv/Scripts/python.exe -m playwright install chromium)",
+      "Bash(python -c \"from app.routers.resume import router; print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''e:/SeekRefine/backend/app/routers/resume.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''e:/SeekRefine/backend/app/services/llm_service.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''e:/SeekRefine/backend/app/services/llm_service.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"from app.routers.generate import router; print\\(''OK''\\)\")",
+      "Bash(.venv/Scripts/python -c \"import sys; sys.path.insert\\(0,''backend''\\); from app.routers.jobs import router; from app.services.scraper import scrape_job_by_url; print\\(''OK''\\)\")"
     ]
   }
 }

@@ -6,6 +6,7 @@ import re
 import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger("seekrefine.jobs")
@@ -283,6 +284,50 @@ async def run_search(profile_id: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"scraped": len(jobs), "new_saved": len(saved)}
+
+
+# --- Import by URL ---
+
+class ImportUrlRequest(BaseModel):
+    url: str
+
+
+@router.post("/import-url", response_model=JobResponse, status_code=201)
+async def import_job_by_url(payload: ImportUrlRequest, db: Session = Depends(get_db)):
+    """Import a single job by its LinkedIn URL."""
+    from app.services import scraper
+
+    url = payload.url.strip()
+    if "linkedin.com" not in url:
+        raise HTTPException(status_code=400, detail="Please provide a valid LinkedIn job URL")
+
+    # Extract linkedin_job_id for dedup
+    linkedin_job_id = _extract_linkedin_job_id(url)
+    job_data_check = {"url": url, "linkedin_job_id": linkedin_job_id}
+    if _is_duplicate(db, job_data_check):
+        # Return existing job instead of error
+        existing = None
+        if linkedin_job_id:
+            existing = db.query(Job).filter(Job.linkedin_job_id == linkedin_job_id).first()
+        if not existing:
+            existing = db.query(Job).filter(Job.url == url).first()
+        if existing:
+            return existing
+        raise HTTPException(status_code=409, detail="This job already exists in your list")
+
+    try:
+        job_data = await scraper.scrape_job_by_url(url)
+    except Exception as e:
+        error_msg = f"{type(e).__name__}: {e}"
+        logger.error(f"URL import failed: {error_msg}")
+        raise HTTPException(status_code=502, detail=f"Failed to scrape job: {error_msg}")
+
+    job_data["linkedin_job_id"] = linkedin_job_id
+    job = Job(**job_data)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 # --- Jobs ---

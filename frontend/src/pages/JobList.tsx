@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Plus, Trash2, Play, Loader2, Sparkles, Check, X, Pencil, Users } from 'lucide-react';
+import { Search, Plus, Trash2, Play, Loader2, Sparkles, Check, X, Pencil, Users, LinkIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { MatchScoreBadge, StatusBadge } from '../components/ui/Badge';
 import { useJobStore } from '../stores/jobStore';
 import { useResumeStore } from '../stores/resumeStore';
-import { generateApi } from '../services/api';
+import { generateApi, jobApi } from '../services/api';
 import type { SearchSuggestion } from '../services/api';
 
 interface ProfileFormState {
@@ -138,7 +138,7 @@ function ProfileFilterFields({ form, setForm }: { form: ProfileFormState; setFor
 export function JobList() {
   const {
     jobs, searchProfiles, scraping, analyzing,
-    fetchJobs, fetchProfiles, createProfile, updateProfile, deleteProfile, deleteJob, runBatchSearches, batchAnalyze,
+    fetchJobs, fetchProfiles, createProfile, updateProfile, deleteProfile, deleteJob, updateJobStatus, runBatchSearches, batchAnalyze,
   } = useJobStore();
   const { resumes, fetchResumes } = useResumeStore();
 
@@ -168,6 +168,13 @@ export function JobList() {
 
   // Scrape results
   const [lastResults, setLastResults] = useState<{ total_scraped: number; total_saved: number; results: Array<{ profile_name: string; scraped: number; new_saved: number; skipped_duplicate: number; skipped_filtered: number; status: string }> } | null>(null);
+
+  // URL import
+  const [importUrl, setImportUrl] = useState('');
+  const [importing, setImporting] = useState(false);
+
+  // Batch ignore by score
+  const [ignoreThreshold, setIgnoreThreshold] = useState('50');
 
   // Job selection for batch delete
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
@@ -325,10 +332,46 @@ export function JobList() {
     } catch { /* handled by store */ }
   };
 
+  const handleBatchIgnore = async () => {
+    const threshold = parseFloat(ignoreThreshold);
+    if (isNaN(threshold) || threshold < 0 || threshold > 100) {
+      alert('Please enter a valid percentage (0-100)');
+      return;
+    }
+    const toIgnore = jobs.filter(
+      (j) => j.status !== 'ignored' && j.status !== 'rejected' && j.match_score != null && j.match_score < threshold
+    );
+    if (toIgnore.length === 0) {
+      alert('No jobs found below the threshold');
+      return;
+    }
+    if (!confirm(`Ignore ${toIgnore.length} job(s) with match score below ${ignoreThreshold}%?`)) return;
+    for (const j of toIgnore) {
+      await updateJobStatus(j.id, 'ignored');
+    }
+    fetchJobs();
+  };
+
+  const handleImportUrl = async () => {
+    const url = importUrl.trim();
+    if (!url) return;
+    setImporting(true);
+    try {
+      const { data } = await jobApi.importByUrl(url);
+      setImportUrl('');
+      fetchJobs();
+      alert(`Imported: ${data.title} at ${data.company}`);
+    } catch (err: any) {
+      alert(`Import failed: ${err?.response?.data?.detail || err.message}`);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const filteredJobs = jobs
     .filter((j) => {
-      // Hide ignored jobs by default — only show them when explicitly filtering by "ignored"
-      if (!statusFilter && j.status === 'ignored') return false;
+      // Hide ignored/rejected jobs by default — only show when explicitly filtering
+      if (!statusFilter && (j.status === 'ignored' || j.status === 'rejected')) return false;
       if (statusFilter && j.status !== statusFilter) return false;
       return true;
     })
@@ -630,6 +673,33 @@ export function JobList() {
         </CardContent>
       </Card>
 
+      {/* Import by URL */}
+      <div className="flex gap-2 items-center">
+        <div className="relative flex-1">
+          <LinkIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="Paste LinkedIn job URL to import..."
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleImportUrl();
+              }
+            }}
+          />
+        </div>
+        <Button
+          size="sm"
+          onClick={handleImportUrl}
+          disabled={importing || !importUrl.trim()}
+        >
+          {importing ? <Loader2 size={14} className="mr-1 animate-spin" /> : <Plus size={14} className="mr-1" />}
+          {importing ? 'Importing...' : 'Import'}
+        </Button>
+      </div>
+
       {/* Filters & Job Actions */}
       <div className="flex gap-3 items-center">
         <div className="relative flex-1">
@@ -646,7 +716,7 @@ export function JobList() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
-          <option value="">Active (excl. Ignored)</option>
+          <option value="">Active</option>
           <option value="new">New</option>
           <option value="interested">Interested</option>
           <option value="applied">Applied</option>
@@ -677,6 +747,22 @@ export function JobList() {
             Delete {selectedJobIds.size}
           </Button>
         )}
+        <div className="flex items-center gap-1 ml-auto">
+          <span className="text-xs text-gray-500 whitespace-nowrap">Ignore below</span>
+          <input
+            className="w-14 rounded-lg border border-gray-300 px-2 py-2 text-sm text-center"
+            type="number"
+            min="0"
+            max="100"
+            value={ignoreThreshold}
+            onChange={(e) => setIgnoreThreshold(e.target.value)}
+          />
+          <span className="text-xs text-gray-500">%</span>
+          <Button size="sm" variant="secondary" onClick={handleBatchIgnore}>
+            <X size={14} className="mr-1" />
+            Batch Ignore
+          </Button>
+        </div>
       </div>
 
       {/* Job List Table */}

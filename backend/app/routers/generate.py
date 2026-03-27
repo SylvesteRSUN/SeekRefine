@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.cover_letter import CoverLetter
+from app.models.followup import FollowUpMessage
 from app.models.job import Job
-from app.models.resume import Resume
+from app.models.resume import Resume, TailoredResume
 from app.schemas.generate import (
     ChatRequest,
     ChatResponse,
@@ -280,6 +281,131 @@ async def chat_with_resume(payload: ChatRequest, db: Session = Depends(get_db)):
         updated_section=updated_section,
         updated_data=updated_data,
     )
+
+
+# --- Job Follow-Up Chat ---
+
+
+class FollowUpChatRequest(BaseModel):
+    job_id: str
+    message: str
+
+
+class FollowUpChatResponse(BaseModel):
+    reply: str
+
+
+class FollowUpMessageItem(BaseModel):
+    id: str
+    role: str
+    content: str
+    created_at: str
+
+
+@router.get("/followup/{job_id}/messages", response_model=list[FollowUpMessageItem])
+async def get_followup_messages(job_id: str, db: Session = Depends(get_db)):
+    """Get all follow-up chat messages for a job."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    messages = (
+        db.query(FollowUpMessage)
+        .filter(FollowUpMessage.job_id == job_id)
+        .order_by(FollowUpMessage.created_at.asc())
+        .all()
+    )
+    return [
+        FollowUpMessageItem(
+            id=m.id, role=m.role, content=m.content,
+            created_at=m.created_at.isoformat(),
+        )
+        for m in messages
+    ]
+
+
+@router.post("/followup/{job_id}/chat", response_model=FollowUpChatResponse)
+async def followup_chat(job_id: str, payload: FollowUpChatRequest, db: Session = Depends(get_db)):
+    """Chat with AI about a specific job application follow-up."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Build context: job info, submitted resume, cover letter, match analysis
+    # Find the most recent tailored resume for this job, or fall back to first resume
+    tailored = (
+        db.query(TailoredResume)
+        .filter(TailoredResume.job_id == job_id)
+        .order_by(TailoredResume.created_at.desc())
+        .first()
+    )
+    if tailored:
+        resume_json = json.dumps(tailored.data, ensure_ascii=False, indent=2)
+    else:
+        resume = db.query(Resume).first()
+        resume_json = json.dumps(resume.data, ensure_ascii=False, indent=2) if resume else "(No resume available)"
+
+    # Find the most recent cover letter for this job
+    cover_letter = (
+        db.query(CoverLetter)
+        .filter(CoverLetter.job_id == job_id)
+        .order_by(CoverLetter.created_at.desc())
+        .first()
+    )
+    cl_text = cover_letter.content if cover_letter else "(No cover letter generated yet)"
+
+    # Load prompt template
+    from pathlib import Path
+    prompt_template = (Path(__file__).parent.parent / "prompts" / "chat_followup.txt").read_text(encoding="utf-8")
+
+    analysis = json.dumps(job.match_analysis or {}, ensure_ascii=False, indent=2)
+
+    system = prompt_template.replace("{job_title}", job.title or "")
+    system = system.replace("{company}", job.company or "")
+    system = system.replace("{location}", job.location or "")
+    system = system.replace("{job_description}", job.description or "(No description)")
+    system = system.replace("{match_analysis}", analysis)
+    system = system.replace("{resume_json}", resume_json)
+    system = system.replace("{cover_letter}", cl_text)
+
+    # Build conversation history from DB
+    history_msgs = (
+        db.query(FollowUpMessage)
+        .filter(FollowUpMessage.job_id == job_id)
+        .order_by(FollowUpMessage.created_at.asc())
+        .all()
+    )
+
+    # Use last 20 messages for context
+    recent = history_msgs[-20:]
+    history_text = ""
+    for m in recent:
+        role = "User" if m.role == "user" else "Assistant"
+        history_text += f"\n{role}: {m.content}\n"
+
+    prompt = f"{history_text}\nUser: {payload.message}\nAssistant:"
+
+    logger.info(f"Follow-up chat [{job.company} - {job.title}]: {payload.message[:100]}...")
+
+    # Call LLM
+    raw_reply = await llm_service.generate(prompt, system, temperature=0.5)
+
+    # Save user message and assistant reply
+    user_msg = FollowUpMessage(job_id=job_id, role="user", content=payload.message)
+    assistant_msg = FollowUpMessage(job_id=job_id, role="assistant", content=raw_reply.strip())
+    db.add(user_msg)
+    db.add(assistant_msg)
+    db.commit()
+
+    return FollowUpChatResponse(reply=raw_reply.strip())
+
+
+@router.delete("/followup/{job_id}/messages")
+async def clear_followup_messages(job_id: str, db: Session = Depends(get_db)):
+    """Clear all follow-up chat messages for a job."""
+    db.query(FollowUpMessage).filter(FollowUpMessage.job_id == job_id).delete()
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.post("/chat/upload")

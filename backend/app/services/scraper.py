@@ -427,6 +427,132 @@ def _run_batch_sync(searches: list[dict], max_pages: int = 3) -> dict[str, list[
     return results
 
 
+def _scrape_single_job_sync(url: str) -> dict:
+    """Sync: open a single LinkedIn job URL and extract its details."""
+    from playwright.sync_api import sync_playwright
+
+    logger.info(f"Scraping single job URL: {url}")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        )
+        _load_cookies(context)
+        page = context.new_page()
+
+        if not _ensure_logged_in(page):
+            browser.close()
+            raise RuntimeError("LinkedIn login failed or timed out")
+
+        page.goto(url, wait_until="domcontentloaded")
+        _random_delay(2, 4)
+
+        # Check if redirected to login
+        if "login" in page.url or "authwall" in page.url:
+            if not _login_linkedin(page):
+                browser.close()
+                raise RuntimeError("LinkedIn login required")
+            page.goto(url, wait_until="domcontentloaded")
+            _random_delay(2, 4)
+
+        # Extract title
+        title = ""
+        for sel in [
+            ".job-details-jobs-unified-top-card__job-title h1",
+            ".jobs-unified-top-card__job-title",
+            ".t-24.t-bold",
+            "h1",
+        ]:
+            el = page.query_selector(sel)
+            if el:
+                title = el.inner_text().strip()
+                if title:
+                    break
+
+        # Extract company
+        company = ""
+        for sel in [
+            ".job-details-jobs-unified-top-card__company-name a",
+            ".job-details-jobs-unified-top-card__company-name",
+            ".jobs-unified-top-card__company-name a",
+            ".jobs-unified-top-card__company-name",
+        ]:
+            el = page.query_selector(sel)
+            if el:
+                company = el.inner_text().strip()
+                if company:
+                    break
+
+        # Extract location
+        location = ""
+        for sel in [
+            ".job-details-jobs-unified-top-card__primary-description-container .tvm__text",
+            ".jobs-unified-top-card__bullet",
+            ".jobs-unified-top-card__workplace-type",
+        ]:
+            el = page.query_selector(sel)
+            if el:
+                location = el.inner_text().strip()
+                if location:
+                    break
+
+        # Extract description
+        desc = ""
+        try:
+            desc_el = page.wait_for_selector(
+                ".jobs-description-content__text, .jobs-description__content, .jobs-box__html-content",
+                timeout=8000,
+            )
+            if desc_el:
+                desc = desc_el.inner_text().strip()
+        except Exception:
+            pass
+
+        # Extract applicant count
+        applicant_count = None
+        for sel in [
+            ".jobs-unified-top-card__applicant-count",
+            ".jobs-unified-top-card__bullet",
+            ".job-details-jobs-unified-top-card__primary-description-container",
+            ".tvm__text--low-emphasis",
+        ]:
+            el = page.query_selector(sel)
+            if el:
+                applicant_count = _extract_applicant_count(el.inner_text())
+                if applicant_count is not None:
+                    break
+
+        if applicant_count is None:
+            for sel in [".jobs-unified-top-card", ".job-details-jobs-unified-top-card__container"]:
+                area = page.query_selector(sel)
+                if area:
+                    applicant_count = _extract_applicant_count(area.inner_text())
+                    if applicant_count is not None:
+                        break
+
+        _save_cookies(page)
+        browser.close()
+
+    if not title:
+        raise ValueError("Could not extract job title from the page — the URL may be invalid or require login")
+
+    logger.info(f"Scraped: {title} @ {company} (applicants: {applicant_count})")
+    return {
+        "title": title,
+        "company": company,
+        "location": location,
+        "url": url,
+        "description": desc,
+        "applicant_count": applicant_count,
+    }
+
+
 # --- Async wrappers (run sync Playwright in a thread) ---
 
 async def search_linkedin_jobs(
@@ -451,3 +577,8 @@ async def search_linkedin_jobs_batch(
 ) -> dict[str, list[dict]]:
     """Run multiple searches sharing one browser session."""
     return await asyncio.to_thread(_run_batch_sync, searches, max_pages)
+
+
+async def scrape_job_by_url(url: str) -> dict:
+    """Scrape a single job by its LinkedIn URL."""
+    return await asyncio.to_thread(_scrape_single_job_sync, url)

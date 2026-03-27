@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, FileText, Loader2, Download, Sparkles, Trash2, ChevronDown, ChevronUp, Copy } from 'lucide-react';
+import { ArrowLeft, ExternalLink, FileText, Loader2, Download, Sparkles, Trash2, ChevronDown, ChevronUp, Copy, MessageSquare } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge, MatchScoreBadge, StatusBadge } from '../components/ui/Badge';
@@ -8,6 +8,7 @@ import { useJobStore } from '../stores/jobStore';
 import { useResumeStore } from '../stores/resumeStore';
 import { generateApi, type TailoredResume } from '../services/api';
 import api from '../services/api';
+import { FollowUpChat } from '../components/FollowUpChat';
 
 interface CoverLetterItem {
   id: string;
@@ -31,6 +32,7 @@ export function JobDetail() {
   const [coverLetters, setCoverLetters] = useState<CoverLetterItem[]>([]);
   const [expandedTailored, setExpandedTailored] = useState<string | null>(null);
   const [expandedCL, setExpandedCL] = useState<string | null>(null);
+  const [showFollowUp, setShowFollowUp] = useState(false);
 
   useEffect(() => {
     if (id) fetchJob(id);
@@ -298,6 +300,15 @@ export function JobDetail() {
             </Card>
           )}
 
+          {/* Follow-Up Chat */}
+          {showFollowUp && currentJob && (
+            <FollowUpChat
+              jobId={currentJob.id}
+              jobTitle={currentJob.title}
+              company={currentJob.company}
+            />
+          )}
+
           {/* Cover Letters */}
           {coverLetters.length > 0 && (
             <Card>
@@ -375,6 +386,15 @@ export function JobDetail() {
                   <Button className="w-full justify-start" variant="secondary" onClick={handleGenerateCL} disabled={generatingCL}>
                     {generatingCL ? <Loader2 size={16} className="mr-2 animate-spin" /> : <FileText size={16} className="mr-2" />}
                     Generate Cover Letter
+                  </Button>
+                  <hr className="border-gray-100" />
+                  <Button
+                    className="w-full justify-start"
+                    variant={showFollowUp ? 'primary' : 'secondary'}
+                    onClick={() => setShowFollowUp(!showFollowUp)}
+                  >
+                    <MessageSquare size={16} className="mr-2" />
+                    {showFollowUp ? 'Hide Follow-Up Chat' : 'Follow-Up Chat'}
                   </Button>
                 </>
               )}
