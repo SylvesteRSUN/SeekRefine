@@ -461,60 +461,142 @@ def _scrape_single_job_sync(url: str) -> dict:
             page.goto(url, wait_until="domcontentloaded")
             _random_delay(2, 4)
 
-        # Extract title
-        title = ""
-        for sel in [
-            ".job-details-jobs-unified-top-card__job-title h1",
-            ".jobs-unified-top-card__job-title",
-            ".t-24.t-bold",
-            "h1",
-        ]:
-            el = page.query_selector(sel)
-            if el:
-                title = el.inner_text().strip()
-                if title:
-                    break
-
-        # Extract company
-        company = ""
-        for sel in [
-            ".job-details-jobs-unified-top-card__company-name a",
-            ".job-details-jobs-unified-top-card__company-name",
-            ".jobs-unified-top-card__company-name a",
-            ".jobs-unified-top-card__company-name",
-        ]:
-            el = page.query_selector(sel)
-            if el:
-                company = el.inner_text().strip()
-                if company:
-                    break
-
-        # Extract location
-        location = ""
-        for sel in [
-            ".job-details-jobs-unified-top-card__primary-description-container .tvm__text",
-            ".jobs-unified-top-card__bullet",
-            ".jobs-unified-top-card__workplace-type",
-        ]:
-            el = page.query_selector(sel)
-            if el:
-                location = el.inner_text().strip()
-                if location:
-                    break
-
-        # Extract description
-        desc = ""
+        # Wait for the JD container (data-testid is stable across LinkedIn redesigns)
         try:
-            desc_el = page.wait_for_selector(
-                ".jobs-description-content__text, .jobs-description__content, .jobs-box__html-content",
-                timeout=8000,
+            page.wait_for_selector(
+                '[data-testid="expandable-text-box"], .jobs-description-content__text, '
+                '.topcard__title, .top-card-layout__title, h1',
+                timeout=15000,
             )
-            if desc_el:
-                desc = desc_el.inner_text().strip()
+        except Exception:
+            logger.warning("Content did not appear within 15s — continuing anyway")
+
+        # Scroll a bit to trigger lazy-loaded sections
+        for _ in range(3):
+            page.mouse.wheel(0, 500)
+            time.sleep(0.4)
+
+        # --- Extract title + company from <title> tag ---
+        # New LinkedIn SDUI format: "Software Developer | Acme Corp | LinkedIn"
+        # Legacy guest page format: "Acme hiring Software Engineer in Stockholm, Sweden | LinkedIn"
+        page_title = page.title() or ""
+        title = ""
+        company = ""
+        location = ""
+
+        # Try "Company hiring Title in Location" first (legacy format)
+        m = re.search(r"^(.+?)\s+hiring\s+(.+?)\s+in\s+(.+?)(?:\s*\|\s*LinkedIn)?$", page_title)
+        if m:
+            company = m.group(1).strip()
+            title = m.group(2).strip()
+            location = m.group(3).strip()
+        elif " | " in page_title:
+            # New SDUI format: "Title | Company | LinkedIn"
+            parts = [p.strip() for p in page_title.split(" | ")]
+            if parts and parts[-1].lower() == "linkedin":
+                parts = parts[:-1]
+            if len(parts) >= 2:
+                title = parts[0]
+                company = parts[1]
+            elif parts:
+                title = parts[0]
+
+        # --- Fallback selectors for title (legacy pages) ---
+        if not title:
+            for sel in [
+                ".job-details-jobs-unified-top-card__job-title",
+                ".jobs-unified-top-card__job-title",
+                ".top-card-layout__title",
+                ".topcard__title",
+                "h1",
+            ]:
+                el = page.query_selector(sel)
+                if el:
+                    t = el.inner_text().strip()
+                    if t:
+                        title = t
+                        break
+
+        # --- Company fallback: a[href*="/company/"] is very stable ---
+        if not company:
+            el = page.query_selector('a[href*="/company/"]')
+            if el:
+                c = el.inner_text().strip()
+                if c:
+                    company = c
+
+        # --- Description: longest [data-testid="expandable-text-box"] is usually the JD ---
+        # Click "see more" buttons to expand any truncated content first
+        try:
+            for btn_sel in [
+                'button[data-testid="expandable-text-button"]',
+                "button.show-more-less-html__button--more",
+                "button.jobs-description__footer-button",
+                "button[aria-label*='see more' i]",
+            ]:
+                buttons = page.query_selector_all(btn_sel)
+                for btn in buttons:
+                    try:
+                        btn.click(timeout=1000)
+                        time.sleep(0.2)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
-        # Extract applicant count
+        desc = ""
+        # Strategy 1: SDUI expandable-text-box (new LinkedIn) — pick the longest one
+        try:
+            boxes = page.query_selector_all('[data-testid="expandable-text-box"]')
+            texts = []
+            for box in boxes:
+                try:
+                    t = box.inner_text().strip()
+                    if t:
+                        texts.append(t)
+                except Exception:
+                    continue
+            if texts:
+                desc = max(texts, key=len)
+        except Exception:
+            pass
+
+        # Strategy 2: legacy JD container classes
+        if not desc:
+            for sel in [
+                ".jobs-description-content__text",
+                ".jobs-description__content",
+                ".jobs-box__html-content",
+                ".show-more-less-html__markup",
+                ".description__text",
+                "#job-details",
+            ]:
+                el = page.query_selector(sel)
+                if el:
+                    t = el.inner_text().strip()
+                    if t:
+                        desc = t
+                        break
+
+        # --- Location fallback: try the top-card text block with location/date/applicants ---
+        # Format is usually "Country City · Posted: X days ago · N applicants"
+        if not location:
+            try:
+                # Find the paragraph containing date posted info
+                for p_el in page.query_selector_all("p"):
+                    txt = p_el.inner_text()
+                    if txt and ("·" in txt) and (
+                        re.search(r"applicant|位申请|位会员|人申请|发布时间|Posted", txt, re.IGNORECASE)
+                    ):
+                        # First segment before the first "·" is usually location
+                        first = txt.split("·")[0].strip()
+                        if first and len(first) < 80:
+                            location = first
+                            break
+            except Exception:
+                pass
+
+        # Extract applicant count — try legacy selectors first, then scan any <p> containing applicant keywords
         applicant_count = None
         for sel in [
             ".jobs-unified-top-card__applicant-count",
@@ -529,6 +611,19 @@ def _scrape_single_job_sync(url: str) -> dict:
                     break
 
         if applicant_count is None:
+            # SDUI layout: scan <p> tags for applicant count text
+            try:
+                for p_el in page.query_selector_all("p"):
+                    txt = p_el.inner_text()
+                    if txt and re.search(r"applicant|位申请|位会员|人申请|前\s*\d+\s*位|超过\s*\d+", txt, re.IGNORECASE):
+                        applicant_count = _extract_applicant_count(txt)
+                        if applicant_count is not None:
+                            break
+            except Exception:
+                pass
+
+        if applicant_count is None:
+            # Last resort: scan legacy top-card containers
             for sel in [".jobs-unified-top-card", ".job-details-jobs-unified-top-card__container"]:
                 area = page.query_selector(sel)
                 if area:
@@ -537,6 +632,22 @@ def _scrape_single_job_sync(url: str) -> dict:
                         break
 
         _save_cookies(page)
+
+        if not title or not company or not desc:
+            try:
+                screenshot_path = COOKIE_FILE.parent / "debug_import_url.png"
+                html_path = COOKIE_FILE.parent / "debug_import_url.html"
+                page.screenshot(path=str(screenshot_path), full_page=True)
+                html_path.write_text(page.content(), encoding="utf-8")
+                logger.warning(
+                    f"Import incomplete — title={bool(title)} company={bool(company)} desc={bool(desc)}"
+                )
+                logger.warning(f"  Final URL: {page.url}")
+                logger.warning(f"  Screenshot: {screenshot_path}")
+                logger.warning(f"  HTML dump: {html_path}")
+            except Exception:
+                pass
+
         browser.close()
 
     if not title:
