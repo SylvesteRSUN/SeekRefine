@@ -32,6 +32,8 @@ def get_active_model() -> str:
     provider = settings.llm_provider
     if provider == "ollama":
         return settings.ollama_model
+    elif provider == "lmstudio":
+        return settings.lmstudio_model
     elif provider == "openai":
         return settings.openai_model
     elif provider == "claude":
@@ -52,7 +54,15 @@ def _ollama_options(temperature: float = 0.7) -> dict:
         "temperature": temperature,
         "num_ctx": settings.ollama_num_ctx,
         "num_predict": settings.ollama_num_predict,
+        # Anti-loop defenses: penalize repetition over a wider window
+        "repeat_penalty": 1.15,
+        "repeat_last_n": 256,
     }
+
+
+# Maximum tokens spent inside a <think>...</think> block before we abort.
+# Normal Qwen3 thinking is ~500-2000 tokens; anything past 6000 indicates a loop.
+THINKING_TOKEN_LIMIT = 6000
 
 
 def _strip_think_blocks(text: str) -> str:
@@ -66,8 +76,8 @@ async def _ollama_generate(prompt: str, system: str, temperature: float) -> str:
     token_count = 0
     think_count = 0
     done_reason = None
-    final_stats = {}
     in_think_block = False
+    aborted_thinking_loop = False
 
     print("\n>>> LLM Output (Ollama): ", end="", flush=True)
 
@@ -83,6 +93,7 @@ async def _ollama_generate(prompt: str, system: str, temperature: float) -> str:
                 "system": system,
                 "stream": True,
                 "options": _ollama_options(temperature),
+                "keep_alive": settings.ollama_keep_alive,
             },
         ) as response:
             response.raise_for_status()
@@ -103,6 +114,11 @@ async def _ollama_generate(prompt: str, system: str, temperature: float) -> str:
                         # Print a dot for each 20 thinking tokens to show progress
                         if think_count % 20 == 0:
                             print(".", end="", flush=True)
+                        # Watchdog: if thinking runs too long, the model is in a loop — abort
+                        if think_count > THINKING_TOKEN_LIMIT:
+                            aborted_thinking_loop = True
+                            print(f"\n[!!! ABORT: thinking exceeded {THINKING_TOKEN_LIMIT} tokens — likely loop]", flush=True)
+                            break
                     else:
                         print(token_text, end="", flush=True)
                     if "</think>" in token_text:
@@ -111,9 +127,12 @@ async def _ollama_generate(prompt: str, system: str, temperature: float) -> str:
 
                 if chunk.get("done"):
                     done_reason = chunk.get("done_reason")
-                    final_stats = chunk
 
     print(f"\n<<< Done ({token_count} tokens, {think_count} thinking)\n")
+
+    if aborted_thinking_loop:
+        logger.warning(f"!!! Aborted runaway thinking loop after {think_count} tokens !!!")
+        raise _ThinkingLoopError(full_response)
 
     if done_reason == "length":
         logger.warning(f"!!! Response TRUNCATED (hit num_predict limit) !!! "
@@ -123,6 +142,13 @@ async def _ollama_generate(prompt: str, system: str, temperature: float) -> str:
     # Strip thinking blocks from the final response
     cleaned = _strip_think_blocks(full_response)
     return cleaned
+
+
+class _ThinkingLoopError(Exception):
+    """Raised when Qwen3 thinking exceeds the watchdog threshold (suspected loop)."""
+    def __init__(self, partial_response: str):
+        self.partial_response = partial_response
+        super().__init__("Thinking loop aborted")
 
 
 class _TruncatedError(Exception):
@@ -146,7 +172,13 @@ async def _openai_generate(
     messages.append({"role": "user", "content": prompt})
 
     full_response = ""
-    label = "DeepSeek" if "deepseek" in base_url.lower() else "OpenAI"
+    b = base_url.lower()
+    if "deepseek" in b:
+        label = "DeepSeek"
+    elif "localhost" in b or "127.0.0.1" in b:
+        label = "LMStudio"
+    else:
+        label = "OpenAI"
     print(f"\n>>> LLM Output ({label}): ", end="", flush=True)
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=10.0, pool=10.0)) as client:
@@ -290,38 +322,86 @@ async def _gemini_generate(prompt: str, system: str, temperature: float) -> str:
 # Unified interface
 # ---------------------------------------------------------------------------
 
-async def generate(prompt: str, system: str = "", temperature: float = 0.7) -> str:
-    """Call configured LLM provider and return full response."""
+def _is_qwen_thinking_model() -> bool:
+    """Detect if active model is a Qwen3-family thinking model (Ollama or LMStudio).
+
+    These models accept the /no_think directive to skip chain-of-thought.
+    """
     provider = settings.llm_provider
+    if provider == "ollama":
+        name = settings.ollama_model.lower()
+    elif provider == "lmstudio":
+        name = settings.lmstudio_model.lower()
+    else:
+        return False
+    return any(tag in name for tag in ("qwen3", "qwen-3", "qwen2.5", "qwen3.5", "qwen3.6"))
+
+
+async def generate(
+    prompt: str,
+    system: str = "",
+    temperature: float = 0.7,
+    enable_thinking: bool = False,
+) -> str:
+    """Call configured LLM provider and return full response.
+
+    For Qwen3 models on Ollama, thinking mode is DISABLED by default because it
+    occasionally enters infinite loops (tens of minutes). Pass enable_thinking=True
+    only for tasks that genuinely benefit from chain-of-thought (rare).
+    """
+    provider = settings.llm_provider
+
+    # Append /no_think for Qwen3 unless explicitly enabled
+    actual_prompt = prompt
+    if not enable_thinking and _is_qwen_thinking_model() and "/no_think" not in prompt:
+        actual_prompt = prompt + "\n/no_think"
 
     logger.info("=" * 60)
     logger.info(f"LLM GENERATE - Provider: {provider}, Model: {get_active_model()}")
-    logger.info(f"  Prompt: {len(prompt)} chars | System: {len(system)} chars | Temp: {temperature}")
+    logger.info(f"  Prompt: {len(actual_prompt)} chars | System: {len(system)} chars | "
+                f"Temp: {temperature} | Thinking: {enable_thinking}")
     logger.info("-" * 60)
 
     start_time = time.time()
 
     try:
         if provider == "ollama":
-            result = await _ollama_generate(prompt, system, temperature)
+            result = await _ollama_generate(actual_prompt, system, temperature)
+        elif provider == "lmstudio":
+            result = await _openai_generate(
+                actual_prompt, system, temperature,
+                settings.lmstudio_api_key, settings.lmstudio_base_url,
+                settings.lmstudio_model, settings.lmstudio_max_tokens,
+            )
+            # LMStudio Qwen3 may still emit <think>...</think> blocks
+            result = _strip_think_blocks(result)
         elif provider == "openai":
             result = await _openai_generate(
-                prompt, system, temperature,
+                actual_prompt, system, temperature,
                 settings.openai_api_key, settings.openai_base_url,
                 settings.openai_model, settings.openai_max_tokens,
             )
         elif provider == "claude":
-            result = await _claude_generate(prompt, system, temperature)
+            result = await _claude_generate(actual_prompt, system, temperature)
         elif provider == "gemini":
-            result = await _gemini_generate(prompt, system, temperature)
+            result = await _gemini_generate(actual_prompt, system, temperature)
         elif provider == "deepseek":
             result = await _openai_generate(
-                prompt, system, temperature,
+                actual_prompt, system, temperature,
                 settings.deepseek_api_key, settings.deepseek_base_url,
                 settings.deepseek_model, settings.deepseek_max_tokens,
             )
         else:
             raise ValueError(f"Unknown LLM provider: {provider}")
+    except _ThinkingLoopError as tle:
+        # Thinking watchdog fired — retry forcing /no_think
+        logger.warning("Retrying without thinking after runaway loop...")
+        forced = prompt + "\n/no_think" if "/no_think" not in prompt else prompt
+        try:
+            result = await _ollama_generate(forced, system, temperature)
+        except (_TruncatedError, _ThinkingLoopError) as e2:
+            partial = getattr(e2, "partial_response", "")
+            result = _strip_think_blocks(partial) or _strip_think_blocks(tle.partial_response)
     except _TruncatedError as te:
         # Ollama truncated - retry once with doubled num_predict
         partial = _strip_think_blocks(te.partial_response)
@@ -330,7 +410,7 @@ async def generate(prompt: str, system: str = "", temperature: float = 0.7) -> s
             original_np = settings.ollama_num_predict
             settings.ollama_num_predict = min(original_np * 2, settings.ollama_num_ctx)
             try:
-                result = await _ollama_generate(prompt, system, temperature)
+                result = await _ollama_generate(actual_prompt, system, temperature)
             except _TruncatedError as te2:
                 # Still truncated - return what we have and let caller handle it
                 logger.error("Still truncated after retry, returning partial response")
@@ -357,15 +437,9 @@ async def generate(prompt: str, system: str = "", temperature: float = 0.7) -> s
 async def generate_json(prompt: str, system: str = "", temperature: float = 0.3) -> dict | list:
     """Call LLM and parse JSON from response.
 
-    For Qwen3 models on Ollama, appends /no_think to disable thinking mode
-    so output tokens are spent on the actual JSON, not chain-of-thought.
+    Thinking is always disabled for JSON tasks (handled by generate()).
     """
-    # Disable thinking for JSON tasks — thinking wastes output tokens
-    actual_prompt = prompt
-    if settings.llm_provider == "ollama" and "qwen" in settings.ollama_model.lower():
-        actual_prompt = prompt + "\n/no_think"
-
-    full_response = await generate(actual_prompt, system, temperature)
+    full_response = await generate(prompt, system, temperature, enable_thinking=False)
 
     if not full_response.strip():
         raise ValueError("LLM returned empty response. The input may be too long for the model's context window.")

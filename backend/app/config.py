@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     ollama_timeout: int = 600  # 10 minutes - large resumes need time
     ollama_num_ctx: int = 65536  # Context window size (input + output)
     ollama_num_predict: int = 32768  # Max output tokens
+    # How long Ollama keeps the model in VRAM after a request.
+    # "5m" (default) caches the model; "0" releases VRAM immediately after each call;
+    # "-1" keeps it loaded forever. Use "0" while developing if you want clean shutdown.
+    ollama_keep_alive: str = "5m"
 
     # OpenAI-compatible (also used for DeepSeek)
     openai_api_key: str = ""
