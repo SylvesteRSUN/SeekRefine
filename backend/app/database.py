@@ -59,7 +59,74 @@ def _migrate_add_columns():
                     logger.info(f"Migration: added {table}.{col_name} ({col_type})")
 
 
+def _backfill_job_urls():
+    """One-time cleanup: canonicalize existing job URLs and populate missing
+    linkedin_job_id. Safe to run repeatedly — only updates rows that need it.
+    Then drops any duplicate jobs that collapse to the same canonical URL.
+    """
+    import logging
+    import re
+
+    logger = logging.getLogger("seekrefine.db")
+
+    def _extract_id(url):
+        if not url:
+            return None
+        m = re.search(r"/jobs/view/(\d+)", url)
+        if m: return m.group(1)
+        m = re.search(r"[?&]currentJobId=(\d+)", url)
+        if m: return m.group(1)
+        m = re.search(r"[?&]referenceJobId=(\d+)", url)
+        if m: return m.group(1)
+        return None
+
+    def _canon(url):
+        jid = _extract_id(url)
+        if jid:
+            return f"https://www.linkedin.com/jobs/view/{jid}/"
+        if url:
+            return url.split("?")[0].split("#")[0]
+        return None
+
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        rows = list(conn.execute(text("SELECT id, url, linkedin_job_id FROM jobs")))
+        updated = 0
+        for row in rows:
+            job_id, url, lid = row
+            new_url = _canon(url)
+            new_lid = lid or _extract_id(url)
+            if (new_url and new_url != url) or (new_lid and new_lid != lid):
+                conn.execute(
+                    text("UPDATE jobs SET url = :url, linkedin_job_id = :lid WHERE id = :id"),
+                    {"url": new_url, "lid": new_lid, "id": job_id},
+                )
+                updated += 1
+
+        if updated > 0:
+            logger.info(f"Backfilled {updated} job URLs to canonical form")
+
+        # Collapse duplicates that now share the same linkedin_job_id (keep oldest)
+        dupes = conn.execute(text("""
+            SELECT linkedin_job_id, COUNT(*) AS c
+            FROM jobs WHERE linkedin_job_id IS NOT NULL
+            GROUP BY linkedin_job_id HAVING c > 1
+        """)).fetchall()
+        dropped = 0
+        for lid, _ in dupes:
+            ids = [r[0] for r in conn.execute(
+                text("SELECT id FROM jobs WHERE linkedin_job_id = :lid ORDER BY scraped_at ASC"),
+                {"lid": lid},
+            )]
+            for dup_id in ids[1:]:
+                conn.execute(text("DELETE FROM jobs WHERE id = :id"), {"id": dup_id})
+                dropped += 1
+        if dropped > 0:
+            logger.info(f"Dropped {dropped} duplicate jobs sharing the same linkedin_job_id")
+
+
 def init_db():
     """Create all tables and run migrations."""
     Base.metadata.create_all(bind=engine)
     _migrate_add_columns()
+    _backfill_job_urls()

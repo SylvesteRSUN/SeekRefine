@@ -48,30 +48,63 @@ def _profile_to_response(profile: SearchProfile) -> dict:
 
 
 def _extract_linkedin_job_id(url: str | None) -> str | None:
-    """Extract LinkedIn job ID from URL like /jobs/view/1234567890/"""
+    """Extract LinkedIn job ID from any LinkedIn job URL variant.
+
+    Handles:
+      /jobs/view/1234567890/                          -> 1234567890
+      /jobs/collections/...?currentJobId=1234567890   -> 1234567890
+      /jobs/search/?currentJobId=1234567890           -> 1234567890
+      /jobs/view/1234567890?trackingId=...&refId=...  -> 1234567890
+    """
     if not url:
         return None
+    # /jobs/view/<id>
     m = re.search(r"/jobs/view/(\d+)", url)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    # ?currentJobId=<id> (SDUI / collections page)
+    m = re.search(r"[?&]currentJobId=(\d+)", url)
+    if m:
+        return m.group(1)
+    # ?referenceJobId=<id> (similar-jobs links)
+    m = re.search(r"[?&]referenceJobId=(\d+)", url)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _canonical_url(url: str | None) -> str | None:
+    """Strip tracking params and return canonical https://www.linkedin.com/jobs/view/<id>/ form.
+
+    Returns the original URL if no job ID can be extracted.
+    """
+    if not url:
+        return None
+    job_id = _extract_linkedin_job_id(url)
+    if job_id:
+        return f"https://www.linkedin.com/jobs/view/{job_id}/"
+    # Fall back to URL without query string
+    return url.split("?")[0].split("#")[0]
 
 
 def _is_duplicate(db: Session, job_data: dict) -> bool:
-    """Check if job already exists by linkedin_job_id, URL, or title+company."""
+    """Check if job already exists by linkedin_job_id, canonical URL, or title+company."""
     linkedin_id = job_data.get("linkedin_job_id")
     if linkedin_id:
         if db.query(Job).filter(Job.linkedin_job_id == linkedin_id).first():
             return True
 
-    url = job_data.get("url")
-    if url:
-        if db.query(Job).filter(Job.url == url).first():
+    # Canonical URL comparison (ignores tracking params)
+    canon = _canonical_url(job_data.get("url"))
+    if canon:
+        if db.query(Job).filter(Job.url == canon).first():
             return True
 
     # Fallback: same title + company = duplicate
-    title = job_data.get("title", "").strip().lower()
-    company = job_data.get("company", "").strip().lower()
+    title = job_data.get("title", "").strip()
+    company = job_data.get("company", "").strip()
     if title and company:
-        existing = db.query(Job).filter(Job.title == job_data["title"], Job.company == job_data["company"]).first()
+        existing = db.query(Job).filter(Job.title == title, Job.company == company).first()
         if existing:
             return True
 
@@ -185,8 +218,9 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
         unknown_applicants = 0
 
         for job_data in jobs_data:
-            # Extract linkedin job ID for dedup
+            # Extract linkedin job ID + canonicalize URL for stable dedup
             job_data["linkedin_job_id"] = _extract_linkedin_job_id(job_data.get("url"))
+            job_data["url"] = _canonical_url(job_data.get("url"))
 
             # Dedup check
             if _is_duplicate(db, job_data):
@@ -265,6 +299,7 @@ async def run_search(profile_id: str, db: Session = Depends(get_db)):
     saved = []
     for job_data in jobs:
         job_data["linkedin_job_id"] = _extract_linkedin_job_id(job_data.get("url"))
+        job_data["url"] = _canonical_url(job_data.get("url"))
 
         if _is_duplicate(db, job_data):
             continue
@@ -323,6 +358,7 @@ async def import_job_by_url(payload: ImportUrlRequest, db: Session = Depends(get
         raise HTTPException(status_code=502, detail=f"Failed to scrape job: {error_msg}")
 
     job_data["linkedin_job_id"] = linkedin_job_id
+    job_data["url"] = _canonical_url(job_data.get("url")) or _canonical_url(url)
     job = Job(**job_data)
     db.add(job)
     db.commit()
