@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./seekrefine.db"
 
-    # LLM Provider: "ollama" | "openai" | "claude" | "gemini" | "deepseek"
+    # LLM Provider: "ollama" | "lmstudio" | "openai" | "claude" | "gemini" | "deepseek"
     llm_provider: str = "ollama"
 
     # Ollama
@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_model: str = "deepseek-chat"
     deepseek_max_tokens: int = 16384
+
+    # LMStudio (local, OpenAI-compatible server)
+    # Default URL is LMStudio's built-in server on http://localhost:1234/v1
+    # Model name must match what's loaded in LMStudio (see LMStudio UI -> Developer tab)
+    lmstudio_base_url: str = "http://localhost:1234/v1"
+    lmstudio_model: str = "mudler/qwen3.6-35b-a3b-apex-gguf/qwen3.6-35b-a3b-apex-i-compact.gguf"
+    lmstudio_api_key: str = "lm-studio"  # placeholder, LMStudio ignores it
+    lmstudio_max_tokens: int = 32768
+    lmstudio_timeout: int = 600
 
     # Scraper
     scraper_delay_min: float = 3.0

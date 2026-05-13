@@ -41,6 +41,8 @@ def _current_model_name() -> str:
     p = settings.llm_provider
     if p == "ollama":
         return settings.ollama_model
+    elif p == "lmstudio":
+        return settings.lmstudio_model
     elif p == "openai":
         return settings.openai_model
     elif p == "claude":
@@ -105,6 +107,12 @@ async def get_llm_config():
             "configured": True,  # always available
         },
         {
+            "id": "lmstudio",
+            "name": "LMStudio (Local)",
+            "model": settings.lmstudio_model,
+            "configured": True,  # always available (assumes user started LMStudio server)
+        },
+        {
             "id": "openai",
             "name": "OpenAI",
             "model": settings.openai_model,
@@ -140,7 +148,7 @@ async def get_llm_config():
 async def update_llm_config(payload: LLMConfigUpdate):
     """Update LLM provider settings at runtime (does not persist to .env)."""
     if payload.provider:
-        if payload.provider not in ("ollama", "openai", "claude", "gemini", "deepseek"):
+        if payload.provider not in ("ollama", "lmstudio", "openai", "claude", "gemini", "deepseek"):
             return {"error": f"Unknown provider: {payload.provider}"}
         settings.llm_provider = payload.provider
 
@@ -148,6 +156,8 @@ async def update_llm_config(payload: LLMConfigUpdate):
         p = settings.llm_provider
         if p == "ollama":
             settings.ollama_model = payload.model
+        elif p == "lmstudio":
+            settings.lmstudio_model = payload.model
         elif p == "openai":
             settings.openai_model = payload.model
         elif p == "claude":
@@ -167,6 +177,8 @@ async def update_llm_config(payload: LLMConfigUpdate):
             settings.gemini_api_key = payload.api_key
         elif p == "deepseek":
             settings.deepseek_api_key = payload.api_key
+        elif p == "lmstudio":
+            settings.lmstudio_api_key = payload.api_key
 
     if payload.base_url:
         p = settings.llm_provider
@@ -174,6 +186,8 @@ async def update_llm_config(payload: LLMConfigUpdate):
             settings.openai_base_url = payload.base_url
         elif p == "deepseek":
             settings.deepseek_base_url = payload.base_url
+        elif p == "lmstudio":
+            settings.lmstudio_base_url = payload.base_url
 
     if payload.max_tokens is not None:
         p = settings.llm_provider
@@ -185,6 +199,8 @@ async def update_llm_config(payload: LLMConfigUpdate):
             settings.gemini_max_tokens = payload.max_tokens
         elif p == "deepseek":
             settings.deepseek_max_tokens = payload.max_tokens
+        elif p == "lmstudio":
+            settings.lmstudio_max_tokens = payload.max_tokens
 
     logging.getLogger("seekrefine").info(
         f"LLM config updated: provider={settings.llm_provider}, model={_current_model_name()}"

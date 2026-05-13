@@ -69,7 +69,8 @@ export function LLMSettings() {
   if (!config) return null;
 
   const currentProviderInfo = config.available_providers.find((p) => p.id === selectedProvider);
-  const needsApiKey = selectedProvider !== 'ollama' && !currentProviderInfo?.configured;
+  const isLocalProvider = selectedProvider === 'ollama' || selectedProvider === 'lmstudio';
+  const needsApiKey = !isLocalProvider && !currentProviderInfo?.configured;
   const hasChanged = selectedProvider !== config.provider || model !== config.model || apiKey || baseUrl;
 
   return (
@@ -83,7 +84,7 @@ export function LLMSettings() {
       </div>
 
       {/* Provider selection */}
-      <div className="grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
         {config.available_providers.map((p: LLMProvider) => (
           <button
             key={p.id}
@@ -95,7 +96,7 @@ export function LLMSettings() {
             }`}
           >
             {p.name}
-            {p.configured && p.id !== 'ollama' && (
+            {p.configured && p.id !== 'ollama' && p.id !== 'lmstudio' && (
               <Check size={12} className="absolute top-1 right-1 text-green-500" />
             )}
           </button>
@@ -114,7 +115,7 @@ export function LLMSettings() {
           />
         </div>
 
-        {selectedProvider !== 'ollama' && (
+        {!isLocalProvider && (
           <div className="flex-1 space-y-1">
             <label className="block text-xs font-medium text-gray-500">
               API Key {currentProviderInfo?.configured && <span className="text-green-500">(set)</span>}
@@ -129,14 +130,14 @@ export function LLMSettings() {
           </div>
         )}
 
-        {(selectedProvider === 'openai' || selectedProvider === 'deepseek') && (
+        {(selectedProvider === 'openai' || selectedProvider === 'deepseek' || selectedProvider === 'lmstudio') && (
           <div className="flex-1 space-y-1">
             <label className="block text-xs font-medium text-gray-500">Base URL (optional)</label>
             <input
               className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="Custom API endpoint"
+              placeholder={selectedProvider === 'lmstudio' ? 'http://localhost:1234/v1' : 'Custom API endpoint'}
             />
           </div>
         )}
