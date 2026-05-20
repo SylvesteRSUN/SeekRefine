@@ -66,8 +66,12 @@ def _backfill_job_urls():
     """
     import logging
     import re
+    from sqlalchemy import inspect
 
     logger = logging.getLogger("seekrefine.db")
+
+    if "jobs" not in inspect(engine).get_table_names():
+        return
 
     def _extract_id(url):
         if not url:
@@ -125,8 +129,27 @@ def _backfill_job_urls():
             logger.info(f"Dropped {dropped} duplicate jobs sharing the same linkedin_job_id")
 
 
+def _ensure_unique_indexes():
+    """Add UNIQUE indexes that the model declares but ALTER TABLE ADD COLUMN
+    didn't create for already-migrated databases. The partial WHERE clause
+    permits multiple NULL values (matches SQLAlchemy unique=True + nullable=True).
+    """
+    import logging
+    from sqlalchemy import text, inspect
+    logger = logging.getLogger("seekrefine.db")
+    if "jobs" not in inspect(engine).get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_jobs_linkedin_job_id_unique "
+            "ON jobs (linkedin_job_id) WHERE linkedin_job_id IS NOT NULL"
+        ))
+        logger.debug("Ensured UNIQUE INDEX on jobs.linkedin_job_id")
+
+
 def init_db():
     """Create all tables and run migrations."""
     Base.metadata.create_all(bind=engine)
     _migrate_add_columns()
     _backfill_job_urls()
+    _ensure_unique_indexes()

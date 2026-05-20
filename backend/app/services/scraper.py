@@ -215,6 +215,20 @@ def _scrape_search(page, keywords, location, remote_type, experience_level,
 
         for i, card in enumerate(cards):
             try:
+                # Skip promoted / sponsored cards — they often have nothing to do
+                # with the search keywords and pollute the list with duplicates.
+                try:
+                    card_text_full = card.inner_text() or ""
+                    lower = card_text_full.lower()
+                    if any(tag in lower for tag in (
+                        "promoted", "sponsored", "广告推广", "赞助", "ç±æèèæ¨å¹¿",  # CN encoding artifacts seen in dumps
+                        "推广", "广告"
+                    )):
+                        logger.debug(f"  Skipped promoted card {i}")
+                        continue
+                except Exception:
+                    pass
+
                 # Try multiple title selectors
                 title_el = (
                     card.query_selector(".job-card-list__title--link")

@@ -205,7 +205,14 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=502, detail=f"Scraper error: {error_msg}")
 
-    # Save results to DB with filtering
+    # Save results to DB with filtering.
+    # In-memory sets prevent the same job appearing twice in the same scrape
+    # (e.g. promoted + organic listing) from both slipping past _is_duplicate,
+    # which only queries committed rows.
+    pending_ids: set[str] = set()
+    pending_urls: set[str] = set()
+    pending_title_company: set[tuple[str, str]] = set()
+
     results = []
     profile_map = {p.id: p for p in profiles}
     for pid, jobs_data in batch_results.items():
@@ -222,7 +229,17 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
             job_data["linkedin_job_id"] = _extract_linkedin_job_id(job_data.get("url"))
             job_data["url"] = _canonical_url(job_data.get("url"))
 
-            # Dedup check
+            lid = job_data.get("linkedin_job_id")
+            curl = job_data.get("url")
+            tc_key = (job_data.get("title", "").strip(), job_data.get("company", "").strip())
+
+            # In-batch dedup: same scrape returned this job already
+            if (lid and lid in pending_ids) or (curl and curl in pending_urls) or \
+               (tc_key[0] and tc_key[1] and tc_key in pending_title_company):
+                skipped_dup += 1
+                continue
+
+            # DB dedup against committed rows
             if _is_duplicate(db, job_data):
                 skipped_dup += 1
                 continue
@@ -248,6 +265,9 @@ async def run_batch_searches(profile_ids: list[str], db: Session = Depends(get_d
             job = Job(**job_data)
             db.add(job)
             saved.append(job)
+            if lid: pending_ids.add(lid)
+            if curl: pending_urls.add(curl)
+            if tc_key[0] and tc_key[1]: pending_title_company.add(tc_key)
 
         if unknown_applicants > 0:
             logger.info(f"  {unknown_applicants} jobs had unknown applicant count (kept anyway)")
@@ -297,9 +317,22 @@ async def run_search(profile_id: str, db: Session = Depends(get_db)):
             pass
 
     saved = []
+    pending_ids: set[str] = set()
+    pending_urls: set[str] = set()
+    pending_title_company: set[tuple[str, str]] = set()
+
     for job_data in jobs:
         job_data["linkedin_job_id"] = _extract_linkedin_job_id(job_data.get("url"))
         job_data["url"] = _canonical_url(job_data.get("url"))
+
+        lid = job_data.get("linkedin_job_id")
+        curl = job_data.get("url")
+        tc_key = (job_data.get("title", "").strip(), job_data.get("company", "").strip())
+
+        # In-batch dedup
+        if (lid and lid in pending_ids) or (curl and curl in pending_urls) or \
+           (tc_key[0] and tc_key[1] and tc_key in pending_title_company):
+            continue
 
         if _is_duplicate(db, job_data):
             continue
@@ -314,6 +347,9 @@ async def run_search(profile_id: str, db: Session = Depends(get_db)):
         job = Job(**job_data)
         db.add(job)
         saved.append(job)
+        if lid: pending_ids.add(lid)
+        if curl: pending_urls.add(curl)
+        if tc_key[0] and tc_key[1]: pending_title_company.add(tc_key)
 
     profile.last_run_at = datetime.now(timezone.utc)
     db.commit()
