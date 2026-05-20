@@ -181,6 +181,7 @@ async def _openai_generate(
         label = "OpenAI"
     print(f"\n>>> LLM Output ({label}): ", end="", flush=True)
 
+    finish_reason = None
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=600.0, write=10.0, pool=10.0)) as client:
         async with client.stream(
             "POST",
@@ -206,15 +207,28 @@ async def _openai_generate(
                     break
                 try:
                     chunk = json.loads(data_str)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    choice = chunk.get("choices", [{}])[0]
+                    delta = choice.get("delta", {})
                     text = delta.get("content", "")
                     if text:
                         full_response += text
                         print(text, end="", flush=True)
+                    # finish_reason appears on the last chunk (sibling of delta)
+                    fr = choice.get("finish_reason")
+                    if fr:
+                        finish_reason = fr
                 except json.JSONDecodeError:
                     continue
 
-    print(f"\n<<< Done ({len(full_response)} chars)\n")
+    print(f"\n<<< Done ({len(full_response)} chars, finish={finish_reason})\n")
+
+    if finish_reason == "length":
+        logger.warning(
+            f"!!! {label} hit max_tokens — output TRUNCATED at {len(full_response)} chars. "
+            f"If using LMStudio, raise the model's Context Length in the Developer tab."
+        )
+        raise _TruncatedError(full_response)
+
     return full_response
 
 
@@ -424,7 +438,14 @@ async def generate(
         logger.error(f"LLM TIMEOUT after {elapsed:.1f}s")
         raise
     except httpx.HTTPStatusError as e:
-        logger.error(f"LLM HTTP Error: {e.response.status_code} - {e.response.text[:500]}")
+        # Streaming responses don't auto-read the body; aread() before .text or it errors
+        body = ""
+        try:
+            await e.response.aread()
+            body = e.response.text[:500]
+        except Exception:
+            pass
+        logger.error(f"LLM HTTP Error: {e.response.status_code} - {body}")
         raise
 
     elapsed = time.time() - start_time
