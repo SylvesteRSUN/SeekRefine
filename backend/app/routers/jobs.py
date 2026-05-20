@@ -402,6 +402,41 @@ async def import_job_by_url(payload: ImportUrlRequest, db: Session = Depends(get
     return job
 
 
+# --- Manual deduplication ---
+
+@router.post("/dedup")
+def dedup_jobs(db: Session = Depends(get_db)):
+    """Collapse jobs that share the same (title, company, location) trio.
+    Keeps the row with the highest match_score (or, if tied/unscored, the oldest).
+    Returns the number of duplicates removed.
+    """
+    from sqlalchemy import func
+
+    groups = (
+        db.query(Job.title, Job.company, Job.location, func.count(Job.id).label("cnt"))
+        .group_by(Job.title, Job.company, Job.location)
+        .having(func.count(Job.id) > 1)
+        .all()
+    )
+
+    deleted = 0
+    for title, company, location, _cnt in groups:
+        rows = (
+            db.query(Job)
+            .filter(Job.title == title, Job.company == company, Job.location == location)
+            .all()
+        )
+        # Sort: highest score first, then oldest scraped_at as tie-breaker.
+        # The first item in the sorted list is the "keeper".
+        rows.sort(key=lambda j: (-(j.match_score if j.match_score is not None else -1.0), j.scraped_at))
+        for dup in rows[1:]:
+            db.delete(dup)
+            deleted += 1
+
+    db.commit()
+    return {"groups": len(groups), "deleted": deleted}
+
+
 # --- Jobs ---
 
 @router.get("/", response_model=list[JobListItem])

@@ -170,6 +170,7 @@ export const jobApi = {
   listCoverLetters: (jobId: string) =>
     api.get<Array<{ id: string; content: string; style: string; created_at: string }>>(`/jobs/${jobId}/cover-letters`),
   importByUrl: (url: string) => api.post<Job>('/jobs/import-url', { url }),
+  dedup: () => api.post<{ groups: number; deleted: number }>('/jobs/dedup'),
   listProfiles: () => api.get<SearchProfile[]>('/jobs/search-profiles'),
   createProfile: (data: Omit<SearchProfile, 'id' | 'last_run_at' | 'created_at'>) =>
     api.post<SearchProfile>('/jobs/search-profiles', data),

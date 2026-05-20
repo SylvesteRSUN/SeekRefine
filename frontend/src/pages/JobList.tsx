@@ -368,6 +368,21 @@ export function JobList() {
     }
   };
 
+  const handleDedup = async () => {
+    if (!confirm('Collapse jobs with the same title + company + location into one row?')) return;
+    try {
+      const { data } = await jobApi.dedup();
+      if (data.deleted === 0) {
+        alert('No duplicates found.');
+      } else {
+        alert(`Removed ${data.deleted} duplicate(s) across ${data.groups} group(s).`);
+        fetchJobs();
+      }
+    } catch (err: any) {
+      alert(`Dedup failed: ${err?.response?.data?.detail || err.message}`);
+    }
+  };
+
   const filteredJobs = jobs
     .filter((j) => {
       // Hide ignored/rejected jobs by default — only show when explicitly filtering
@@ -761,6 +776,10 @@ export function JobList() {
           <Button size="sm" variant="secondary" onClick={handleBatchIgnore}>
             <X size={14} className="mr-1" />
             Batch Ignore
+          </Button>
+          <Button size="sm" variant="secondary" onClick={handleDedup} title="Merge jobs with identical title + company + location">
+            <Trash2 size={14} className="mr-1" />
+            Dedup
           </Button>
         </div>
       </div>
