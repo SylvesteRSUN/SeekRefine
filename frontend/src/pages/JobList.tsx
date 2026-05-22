@@ -148,6 +148,12 @@ export function JobList() {
   const [searchText, setSearchText] = useState('');
   const [sortBy, setSortBy] = useState<'match' | 'applicants'>('match');
 
+  // AI chat state for batch profile management
+  const [showChat, setShowChat] = useState(false);
+  const [chatHistory, setChatHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+
   // AI suggestion state
   const [suggesting, setSuggesting] = useState(false);
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
@@ -202,6 +208,31 @@ export function JobList() {
       alert(`AI suggestion failed: ${err?.response?.data?.detail || err.message}`);
     } finally {
       setSuggesting(false);
+    }
+  };
+
+  const handleSendChat = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatSending) return;
+    const resumeId = selectedResumeId || resumes[0]?.id;
+    setChatSending(true);
+    const userMsg = { role: 'user' as const, content: msg };
+    const nextHistory = [...chatHistory, userMsg];
+    setChatHistory(nextHistory);
+    setChatInput('');
+    try {
+      const { data } = await generateApi.searchProfileChat(msg, chatHistory, resumeId);
+      setChatHistory([...nextHistory, { role: 'assistant', content: data.reply }]);
+      if (data.created || data.updated || data.deleted) {
+        fetchProfiles();
+      }
+    } catch (err: any) {
+      setChatHistory([...nextHistory, {
+        role: 'assistant',
+        content: `Error: ${err?.response?.data?.detail || err.message}`
+      }]);
+    } finally {
+      setChatSending(false);
     }
   };
 
@@ -460,6 +491,10 @@ export function JobList() {
               {suggesting ? <Loader2 size={14} className="mr-1 animate-spin" /> : <Sparkles size={14} className="mr-1" />}
               {suggesting ? 'Analyzing...' : 'AI Generate'}
             </Button>
+            <Button size="sm" variant={showChat ? 'primary' : 'secondary'} onClick={() => setShowChat(!showChat)}>
+              <Sparkles size={14} className="mr-1" />
+              AI Chat
+            </Button>
             <Button size="sm" variant="secondary" onClick={() => setShowNewProfile(!showNewProfile)}>
               <Plus size={14} className="mr-1" /> Manual
             </Button>
@@ -472,6 +507,56 @@ export function JobList() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* AI Chat panel for batch profile management */}
+          {showChat && (
+            <div className="border border-blue-200 bg-blue-50/50 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-blue-800">
+                  AI Chat — create or batch-modify search profiles
+                </h3>
+                <button onClick={() => setShowChat(false)} className="text-blue-400 hover:text-blue-600">
+                  <X size={16} />
+                </button>
+              </div>
+              {chatHistory.length > 0 && (
+                <div className="max-h-56 overflow-y-auto space-y-2 text-sm bg-white rounded p-2 border border-blue-100">
+                  {chatHistory.map((m, i) => (
+                    <div key={i} className={m.role === 'user' ? 'text-gray-800' : 'text-blue-700'}>
+                      <span className="font-medium">{m.role === 'user' ? 'You: ' : 'AI: '}</span>
+                      <span className="whitespace-pre-wrap">{m.content}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  placeholder='e.g. "Set all profiles to last week & max 30 applicants" or "Create a profile for embedded firmware roles in Lund"'
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendChat();
+                    }
+                  }}
+                  disabled={chatSending}
+                />
+                <Button size="sm" onClick={handleSendChat} disabled={chatSending || !chatInput.trim()}>
+                  {chatSending ? <Loader2 size={14} className="animate-spin" /> : 'Send'}
+                </Button>
+                {chatHistory.length > 0 && (
+                  <Button size="sm" variant="ghost" onClick={() => setChatHistory([])}>
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-gray-500">
+                Examples: "Add a profile for ML internships in Stockholm, posted this week" • "Lower max applicants to 20 for all profiles" • "Delete the iOS one"
+              </p>
+            </div>
+          )}
+
           {/* Scrape Results */}
           {lastResults && (
             <div className="border border-green-200 bg-green-50/50 rounded-lg p-4 space-y-2">

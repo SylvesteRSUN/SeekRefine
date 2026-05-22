@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.cover_letter import CoverLetter
 from app.models.followup import FollowUpMessage
-from app.models.job import Job
+from app.models.job import Job, SearchProfile
 from app.models.resume import Resume, TailoredResume
 from app.schemas.generate import (
     ChatRequest,
@@ -21,6 +21,8 @@ from app.schemas.generate import (
     CoverLetterResponse,
     MatchAnalysisRequest,
     MatchAnalysisResponse,
+    SearchProfileChatRequest,
+    SearchProfileChatResponse,
     SearchSuggestion,
     SuggestSearchesRequest,
     SuggestSearchesResponse,
@@ -171,6 +173,158 @@ async def suggest_searches(payload: SuggestSearchesRequest, db: Session = Depend
             continue
 
     return SuggestSearchesResponse(suggestions=suggestions)
+
+
+# --- Search profile chatbot ---
+
+_PROFILE_ALLOWED_FIELDS = {
+    "name", "keywords", "location", "remote_type", "experience_level",
+    "date_posted", "sort_by", "max_applicants", "exclude_keywords",
+}
+
+
+def _parse_profile_action(text: str) -> dict | None:
+    """Extract seekrefine_profile_action JSON from LLM response."""
+    pattern = r"```seekrefine_profile_action\s*\n(.*?)\n```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse profile action block: {match.group(1)[:200]}")
+    return None
+
+
+def _clean_profile_reply(text: str) -> str:
+    pattern = r"\n*```seekrefine_profile_action\s*\n.*?\n```\s*"
+    return re.sub(pattern, "", text, flags=re.DOTALL).strip()
+
+
+def _profile_dict(p: SearchProfile) -> dict:
+    """Serialize a SearchProfile row for the LLM and the API response."""
+    excl = []
+    if p.exclude_keywords:
+        try:
+            excl = json.loads(p.exclude_keywords)
+        except (json.JSONDecodeError, TypeError):
+            excl = []
+    return {
+        "id": p.id,
+        "name": p.name,
+        "keywords": p.keywords,
+        "location": p.location,
+        "remote_type": p.remote_type,
+        "experience_level": p.experience_level,
+        "date_posted": p.date_posted,
+        "sort_by": p.sort_by,
+        "max_applicants": p.max_applicants,
+        "exclude_keywords": excl,
+    }
+
+
+def _sanitize_patch(data: dict) -> dict:
+    """Strip unknown fields; convert exclude_keywords list to JSON string for DB."""
+    clean = {k: v for k, v in data.items() if k in _PROFILE_ALLOWED_FIELDS}
+    if "exclude_keywords" in clean and isinstance(clean["exclude_keywords"], list):
+        clean["exclude_keywords"] = json.dumps(clean["exclude_keywords"])
+    elif "exclude_keywords" in clean and clean["exclude_keywords"] is None:
+        clean["exclude_keywords"] = None
+    return clean
+
+
+@router.post("/search-profile-chat", response_model=SearchProfileChatResponse)
+async def search_profile_chat(payload: SearchProfileChatRequest, db: Session = Depends(get_db)):
+    """Chat-driven CRUD for search profiles.
+    User says e.g. "set all profiles to last week postings, max 30 applicants"
+    or "create a new profile for embedded firmware jobs in Lund".
+    """
+    from pathlib import Path
+
+    profiles = db.query(SearchProfile).order_by(SearchProfile.created_at.desc()).all()
+    profiles_json = json.dumps([_profile_dict(p) for p in profiles], ensure_ascii=False, indent=2)
+
+    resume_summary = ""
+    if payload.resume_id:
+        from app.models.resume import Resume
+        resume = db.query(Resume).filter(Resume.id == payload.resume_id).first()
+        if resume:
+            # Keep resume summary compact — only what's useful for profile generation
+            d = resume.data or {}
+            parts = []
+            if d.get("personal_info", {}).get("first_name"):
+                parts.append(f"Name: {d['personal_info'].get('first_name')} {d['personal_info'].get('last_name', '')}")
+            edu = d.get("education", [])
+            if edu:
+                top = edu[0]
+                parts.append(f"Studying: {top.get('degree', '')} at {top.get('school', '')}")
+            skills = d.get("skills", {})
+            if skills:
+                parts.append("Skills: " + ", ".join(f"{k}: {v}" for k, v in list(skills.items())[:6]))
+            resume_summary = "\n".join(parts) or "(no resume context)"
+
+    prompt_template = (Path(__file__).parent.parent / "prompts" / "chat_search_profile.txt").read_text(encoding="utf-8")
+    system = (prompt_template
+              .replace("{profiles_json}", profiles_json)
+              .replace("{resume_summary}", resume_summary or "(no resume linked)"))
+
+    history_text = ""
+    for msg in payload.history[-10:]:
+        role = "User" if msg.role == "user" else "Assistant"
+        history_text += f"\n{role}: {msg.content}\n"
+
+    prompt = f"{history_text}\nUser: {payload.message}\nAssistant:"
+
+    raw_reply = await llm_service.generate(prompt, system, temperature=0.4)
+    action = _parse_profile_action(raw_reply)
+    clean_reply = _clean_profile_reply(raw_reply)
+
+    created = updated = deleted = 0
+
+    if action and isinstance(action.get("operations"), list):
+        existing_ids = {p.id for p in profiles}
+        for op in action["operations"]:
+            kind = op.get("action")
+            try:
+                if kind == "create":
+                    data = _sanitize_patch(op.get("data") or {})
+                    if not data.get("name") or not data.get("keywords"):
+                        continue
+                    profile = SearchProfile(**data)
+                    db.add(profile)
+                    created += 1
+                elif kind == "update":
+                    ids = [i for i in (op.get("ids") or []) if i in existing_ids]
+                    patch = _sanitize_patch(op.get("patch") or {})
+                    if not ids or not patch:
+                        continue
+                    rows = db.query(SearchProfile).filter(SearchProfile.id.in_(ids)).all()
+                    for row in rows:
+                        for k, v in patch.items():
+                            setattr(row, k, v)
+                        updated += 1
+                elif kind == "delete":
+                    ids = [i for i in (op.get("ids") or []) if i in existing_ids]
+                    if not ids:
+                        continue
+                    rows = db.query(SearchProfile).filter(SearchProfile.id.in_(ids)).all()
+                    for row in rows:
+                        db.delete(row)
+                        deleted += 1
+            except Exception as e:
+                logger.warning(f"Skipping bad profile op {op}: {type(e).__name__}: {e}")
+                continue
+
+        if created or updated or deleted:
+            db.commit()
+
+    refreshed = db.query(SearchProfile).order_by(SearchProfile.created_at.desc()).all()
+    return SearchProfileChatResponse(
+        reply=clean_reply or "(no reply)",
+        created=created,
+        updated=updated,
+        deleted=deleted,
+        profiles=[_profile_dict(p) for p in refreshed],
+    )
 
 
 # --- Chat ---

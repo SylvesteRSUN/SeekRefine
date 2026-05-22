@@ -235,6 +235,14 @@ export const generateApi = {
     api.get<{ latex_source: string; filename: string }>(`/resumes/${resumeId}/export/latex`),
   suggestSearches: (resume_id: string) =>
     api.post<{ suggestions: SearchSuggestion[] }>('/generate/suggest-searches', { resume_id }, { timeout: 600000 }),
+  searchProfileChat: (message: string, history: ChatMessage[], resume_id?: string) =>
+    api.post<{
+      reply: string;
+      created: number;
+      updated: number;
+      deleted: number;
+      profiles: SearchProfile[];
+    }>('/generate/search-profile-chat', { message, history, resume_id: resume_id ?? null }, { timeout: 600000 }),
   matchAnalysis: (resume_id: string, job_id: string) =>
     api.post<MatchAnalysis>('/generate/match-analysis', { resume_id, job_id }),
   tailorResume: (resume_id: string, job_id: string) =>

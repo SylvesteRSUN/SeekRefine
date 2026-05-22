@@ -67,3 +67,19 @@ class ChatResponse(BaseModel):
     reply: str
     updated_section: str | None = None  # Which section was modified, if any
     updated_data: dict | list | None = None  # The new section data
+
+
+# --- Search profile chatbot ---
+
+class SearchProfileChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
+    resume_id: str | None = None  # Optional: for "create new" context
+
+
+class SearchProfileChatResponse(BaseModel):
+    reply: str
+    created: int = 0
+    updated: int = 0
+    deleted: int = 0
+    profiles: list[dict] = []  # Full refreshed profile list
