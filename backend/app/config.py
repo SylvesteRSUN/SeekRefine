@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./seekrefine.db"
 
     # LLM Provider: "ollama" | "lmstudio" | "openai" | "claude" | "gemini" | "deepseek"
-    llm_provider: str = "ollama"
+    llm_provider: str = "lmstudio"
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"

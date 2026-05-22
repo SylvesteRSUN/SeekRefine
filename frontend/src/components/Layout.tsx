@@ -41,7 +41,7 @@ export function Layout() {
 
         <div className="p-4 border-t border-gray-100">
           <p className="text-xs text-gray-400 text-center">
-            Powered by Ollama + Qwen3.5
+            Powered by LMStudio + Qwen3.6
           </p>
         </div>
       </aside>
