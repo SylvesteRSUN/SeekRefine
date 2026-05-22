@@ -540,23 +540,63 @@ def _scrape_single_job_sync(url: str) -> dict:
                     company = c
 
         # --- Description: longest [data-testid="expandable-text-box"] is usually the JD ---
-        # Click "see more" buttons to expand any truncated content first
-        try:
+        # Aggressively expand any truncated content first. Multiple fallback strategies
+        # because LinkedIn varies by page type (SDUI vs legacy) and locale.
+        def _try_expand_buttons():
             for btn_sel in [
                 'button[data-testid="expandable-text-button"]',
                 "button.show-more-less-html__button--more",
                 "button.jobs-description__footer-button",
                 "button[aria-label*='see more' i]",
+                "button[aria-label*='show more' i]",
+                "button[aria-label*='查看更多']",
+                "button[aria-label*='展开']",
+                "button[aria-label*='æ´å¤']",  # CN encoding artifact seen in dumps
             ]:
-                buttons = page.query_selector_all(btn_sel)
+                try:
+                    buttons = page.query_selector_all(btn_sel)
+                except Exception:
+                    continue
                 for btn in buttons:
                     try:
-                        btn.click(timeout=1000)
-                        time.sleep(0.2)
+                        # Scroll into view so the click target is actually visible
+                        btn.scroll_into_view_if_needed(timeout=1500)
+                        # Regular click first; if intercepted, force; if still no luck, dispatch DOM event
+                        try:
+                            btn.click(timeout=1500)
+                        except Exception:
+                            try:
+                                btn.click(force=True, timeout=1500)
+                            except Exception:
+                                btn.dispatch_event("click")
+                        time.sleep(0.4)
                     except Exception:
-                        pass
-        except Exception:
-            pass
+                        continue
+
+        # Measure JD length before/after expand; if no growth, retry once more.
+        def _measure_jd_len() -> int:
+            try:
+                boxes = page.query_selector_all('[data-testid="expandable-text-box"]')
+                if boxes:
+                    return max((len(b.inner_text() or "") for b in boxes), default=0)
+                el = page.query_selector(
+                    ".jobs-description-content__text, .jobs-description__content, "
+                    ".jobs-box__html-content, .show-more-less-html__markup, "
+                    ".description__text, #job-details"
+                )
+                return len(el.inner_text() or "") if el else 0
+            except Exception:
+                return 0
+
+        before_len = _measure_jd_len()
+        _try_expand_buttons()
+        after_len = _measure_jd_len()
+        # Some pages need a second pass (button morphs after first click)
+        if after_len <= before_len + 50:
+            time.sleep(0.5)
+            _try_expand_buttons()
+            after_len = _measure_jd_len()
+        logger.info(f"JD length after expansion attempts: {before_len} -> {after_len}")
 
         desc = ""
         # Strategy 1: SDUI expandable-text-box (new LinkedIn) — pick the longest one
