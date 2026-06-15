@@ -472,6 +472,27 @@ def update_job_status(job_id: str, payload: JobStatusUpdate, db: Session = Depen
     return job
 
 
+class JobCategoryUpdateBody(BaseModel):
+    category_id: str | None = None
+
+
+@router.patch("/{job_id}/category", response_model=JobResponse)
+def update_job_category(job_id: str, payload: JobCategoryUpdateBody, db: Session = Depends(get_db)):
+    """Manually (re)assign a job's category. Pass null to clear it."""
+    from app.models.job import JobCategory
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if payload.category_id is not None:
+        cat = db.query(JobCategory).filter(JobCategory.id == payload.category_id).first()
+        if not cat:
+            raise HTTPException(status_code=404, detail="Category not found")
+    job.category_id = payload.category_id
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 @router.delete("/{job_id}", status_code=204)
 def delete_job(job_id: str, db: Session = Depends(get_db)):
     job = db.query(Job).filter(Job.id == job_id).first()

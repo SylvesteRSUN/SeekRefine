@@ -11,7 +11,8 @@ from pydantic import BaseModel
 from app.config import settings
 from app.database import init_db
 from app.models import followup as _followup_models  # noqa: F401 — ensure table created
-from app.routers import generate, jobs, resume
+from app.models import job as _job_models  # noqa: F401 — ensure JobCategory table created
+from app.routers import categories, generate, jobs, resume
 
 # Configure logging - show LLM activity in console
 logging.basicConfig(
@@ -73,6 +74,7 @@ app.add_middleware(
 # Register routers
 app.include_router(resume.router, prefix="/api/resumes", tags=["Resumes"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
+app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
 app.include_router(generate.router, prefix="/api/generate", tags=["Generate"])
 
 

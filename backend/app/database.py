@@ -39,6 +39,7 @@ def _migrate_add_columns():
         "jobs": [
             ("linkedin_job_id", "VARCHAR(50)"),
             ("applicant_count", "INTEGER"),
+            ("category_id", "VARCHAR(36)"),
         ],
         "search_profiles": [
             ("date_posted", "VARCHAR(20)"),

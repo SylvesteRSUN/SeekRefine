@@ -46,19 +46,47 @@ def _get_resume_and_job(db: Session, resume_id: str, job_id: str):
     return resume, job
 
 
+def _load_categories(db: Session):
+    """Return (categories_prompt_text, name->id map) for classification.
+    Empty string + empty map when no categories exist (classification skipped)."""
+    from app.models.job import JobCategory
+    cats = db.query(JobCategory).all()
+    if not cats:
+        return "", {}
+    lines = []
+    name_to_id = {}
+    for c in cats:
+        lines.append(f"- {c.name}: {c.description or '(no description)'}")
+        name_to_id[c.name.strip().lower()] = c.id
+    return "\n".join(lines), name_to_id
+
+
+def _apply_category(job, result: dict, name_to_id: dict):
+    """Map the LLM-returned category name to a category_id and set it on the job."""
+    if not name_to_id:
+        return
+    cat_name = (result.get("category") or "").strip().lower()
+    if cat_name and cat_name in name_to_id:
+        job.category_id = name_to_id[cat_name]
+    # If LLM returned null / unknown, leave category_id untouched (don't clobber a manual choice)
+
+
 @router.post("/match-analysis", response_model=MatchAnalysisResponse)
 async def analyze_match(payload: MatchAnalysisRequest, db: Session = Depends(get_db)):
     """Analyze match between resume and job using LLM."""
     resume, job = _get_resume_and_job(db, payload.resume_id, payload.job_id)
 
+    categories_text, name_to_id = _load_categories(db)
     result = await llm_service.match_analysis(
         resume_json=json.dumps(resume.data, ensure_ascii=False),
         job_description=job.description or "",
+        categories=categories_text,
     )
 
     # Save analysis to job
     job.match_score = result.get("score", 0)
     job.match_analysis = result
+    _apply_category(job, result, name_to_id)
     db.commit()
 
     return MatchAnalysisResponse(**result)
@@ -136,15 +164,18 @@ async def batch_analyze(
     else:
         target_jobs = db.query(Job).all()
 
+    categories_text, name_to_id = _load_categories(db)
     results = []
     for job in target_jobs:
         try:
             result = await llm_service.match_analysis(
                 resume_json=json.dumps(resume.data, ensure_ascii=False),
                 job_description=job.description or "",
+                categories=categories_text,
             )
             job.match_score = result.get("score", 0)
             job.match_analysis = result
+            _apply_category(job, result, name_to_id)
             results.append({"job_id": job.id, "title": job.title, "score": job.match_score, "status": "ok"})
         except Exception as e:
             results.append({"job_id": job.id, "title": job.title, "score": None, "status": f"error: {str(e)}"})

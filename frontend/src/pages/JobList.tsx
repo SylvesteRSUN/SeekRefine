@@ -4,11 +4,11 @@ import { Search, Plus, Trash2, Play, Loader2, Sparkles, Check, X, Pencil, Users,
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { MatchScoreBadge, StatusBadge } from '../components/ui/Badge';
+import { MatchScoreBadge, StatusBadge, CategoryBadge } from '../components/ui/Badge';
 import { useJobStore } from '../stores/jobStore';
 import { useResumeStore } from '../stores/resumeStore';
-import { generateApi, jobApi } from '../services/api';
-import type { SearchSuggestion } from '../services/api';
+import { generateApi, jobApi, categoryApi } from '../services/api';
+import type { SearchSuggestion, JobCategory } from '../services/api';
 
 interface ProfileFormState {
   name: string;
@@ -145,8 +145,10 @@ export function JobList() {
   const [showNewProfile, setShowNewProfile] = useState(false);
   const [profileForm, setProfileForm] = useState<ProfileFormState>({ ...emptyForm });
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('');
   const [searchText, setSearchText] = useState('');
   const [sortBy, setSortBy] = useState<'match' | 'applicants'>('match');
+  const [categories, setCategories] = useState<JobCategory[]>([]);
 
   // AI chat state for batch profile management
   const [showChat, setShowChat] = useState(false);
@@ -189,6 +191,7 @@ export function JobList() {
     fetchJobs();
     fetchProfiles();
     fetchResumes();
+    categoryApi.list().then(({ data }) => setCategories(data)).catch(() => {});
   }, []);
 
   const handleAISuggest = async () => {
@@ -420,6 +423,11 @@ export function JobList() {
       if (!statusFilter && (j.status === 'ignored' || j.status === 'rejected')) return false;
       if (statusFilter && j.status !== statusFilter) return false;
       return true;
+    })
+    .filter((j) => {
+      if (!categoryFilter) return true;
+      if (categoryFilter === '__none__') return !j.category_id;
+      return j.category_id === categoryFilter;
     })
     .filter((j) =>
       !searchText ||
@@ -823,6 +831,17 @@ export function JobList() {
           <option value="ignored">Ignored</option>
           <option value="rejected">Rejected</option>
         </select>
+        {categories.length > 0 && (
+          <select
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+          >
+            <option value="">All Categories</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value="__none__">Uncategorized</option>
+          </select>
+        )}
         <select
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
           value={sortBy}
@@ -910,6 +929,7 @@ export function JobList() {
                 >
                   Match {sortBy === 'match' && '↓'}
                 </th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Category</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Status</th>
                 <th className="px-3 py-3 w-8"></th>
               </tr>
@@ -943,6 +963,7 @@ export function JobList() {
                     {job.applicant_count != null ? job.applicant_count : '-'}
                   </td>
                   <td className="px-4 py-3 text-center"><MatchScoreBadge score={job.match_score} /></td>
+                  <td className="px-4 py-3 text-center"><CategoryBadge name={job.category_name} color={job.category_color} /></td>
                   <td className="px-4 py-3 text-center"><StatusBadge status={job.status} /></td>
                   <td className="px-3 py-3">
                     <button

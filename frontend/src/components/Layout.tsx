@@ -1,11 +1,12 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { FileText, Briefcase, LayoutDashboard } from 'lucide-react';
+import { FileText, Briefcase, LayoutDashboard, Tags } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/resumes', icon: FileText, label: 'Resumes' },
   { to: '/jobs', icon: Briefcase, label: 'Jobs' },
+  { to: '/categories', icon: Tags, label: 'Categories' },
 ];
 
 export function Layout() {

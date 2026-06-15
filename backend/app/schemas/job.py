@@ -62,6 +62,9 @@ class JobResponse(BaseModel):
     match_score: float | None
     match_analysis: dict | None
     status: str
+    category_id: str | None = None
+    category_name: str | None = None
+    category_color: str | None = None
     scraped_at: datetime
     updated_at: datetime
 
@@ -77,6 +80,9 @@ class JobListItem(BaseModel):
     applicant_count: int | None
     match_score: float | None
     status: str
+    category_id: str | None = None
+    category_name: str | None = None
+    category_color: str | None = None
     scraped_at: datetime
 
     class Config:

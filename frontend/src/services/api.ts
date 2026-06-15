@@ -127,9 +127,13 @@ export interface Job {
   remote_type: string | null;
   experience_level: string | null;
   salary_range: string | null;
+  applicant_count: number | null;
   match_score: number | null;
   match_analysis: MatchAnalysis | null;
   status: string;
+  category_id: string | null;
+  category_name: string | null;
+  category_color: string | null;
   scraped_at: string;
   updated_at: string;
 }
@@ -142,6 +146,9 @@ export interface JobListItem {
   applicant_count: number | null;
   match_score: number | null;
   status: string;
+  category_id: string | null;
+  category_name: string | null;
+  category_color: string | null;
   scraped_at: string;
 }
 
@@ -181,6 +188,41 @@ export const jobApi = {
     api.post<{ scraped: number; new_saved: number }>(`/jobs/search-profiles/${profileId}/run`),
   runBatchSearches: (profileIds: string[]) =>
     api.post<{ total_scraped: number; total_saved: number; results: Array<{ profile_name: string; scraped: number; new_saved: number; status: string }> }>('/jobs/search-profiles/run-batch', profileIds),
+};
+
+// --- Category APIs ---
+
+export interface JobCategory {
+  id: string;
+  name: string;
+  color: string;
+  description: string | null;
+  base_resume_id: string | null;
+  has_resume: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CategorySuggestion {
+  name: string;
+  color: string;
+  description: string;
+}
+
+export const categoryApi = {
+  list: () => api.get<JobCategory[]>('/categories/'),
+  create: (data: { name: string; color?: string; description?: string | null; base_resume_id?: string | null }) =>
+    api.post<JobCategory>('/categories/', data),
+  update: (id: string, data: Partial<{ name: string; color: string; description: string | null; base_resume_id: string | null }>) =>
+    api.put<JobCategory>(`/categories/${id}`, data),
+  delete: (id: string) => api.delete(`/categories/${id}`),
+  generateResume: (id: string) =>
+    api.post<JobCategory>(`/categories/${id}/generate-resume`, undefined, { timeout: 600000 }),
+  getResume: (id: string) => api.get<ResumeData>(`/categories/${id}/resume`),
+  exportLatex: (id: string) =>
+    api.get<{ latex_source: string; filename: string }>(`/categories/${id}/export/latex`),
+  suggest: (resume_id: string) =>
+    api.post<{ suggestions: CategorySuggestion[] }>('/categories/suggest', { resume_id }, { timeout: 600000 }),
 };
 
 // --- Generate APIs ---

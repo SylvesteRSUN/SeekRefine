@@ -6,7 +6,8 @@ Output ONLY valid JSON with this exact structure:
   "matching_points": ["point1", "point2", ...],
   "gaps": ["gap1", "gap2", ...],
   "recommendation": "<brief recommendation>",
-  "suggested_projects": ["project title 1", "project title 2", ...]
+  "suggested_projects": ["project title 1", "project title 2", ...],
+  "category": "<exact category name from the list below, or null>"
 }
 
 Rules:
@@ -17,4 +18,7 @@ Rules:
 - matching_points: List specific skills, experiences, or qualifications that match
 - gaps: List specific requirements the candidate lacks
 - suggested_projects: List project titles from the resume that are most relevant to this job
+- category: If a list of categories is provided below, pick the SINGLE best-fit
+  category and return its name EXACTLY as written. If none fit well, or no
+  categories are provided, return null. Never invent a category name.
 - Be objective and specific, not generic

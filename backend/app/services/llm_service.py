@@ -554,9 +554,11 @@ def _try_repair_json(text: str) -> dict | list | None:
 # Task-specific helpers (unchanged interface)
 # ---------------------------------------------------------------------------
 
-async def match_analysis(resume_json: str, job_description: str) -> dict:
+async def match_analysis(resume_json: str, job_description: str, categories: str = "") -> dict:
     system = _load_prompt("match_analysis")
     prompt = f"## Resume\n{resume_json}\n\n## Job Description\n{job_description}"
+    if categories:
+        prompt += f"\n\n## Available Categories (pick the best fit for 'category', or null)\n{categories}"
     return await generate_json(prompt, system)
 
 
@@ -570,9 +572,27 @@ async def tailor_resume(resume_json: str, job_description: str, analysis: str) -
     return await generate_json(prompt, system, temperature=0.4)
 
 
+async def tailor_resume_for_category(resume_json: str, category_name: str, category_description: str) -> dict:
+    """Tailor a base resume toward a whole category of roles (not a specific JD)."""
+    system = _load_prompt("tailor_resume_category")
+    prompt = (
+        f"## Original Resume\n{resume_json}\n\n"
+        f"## Target Job Category: {category_name}\n{category_description or '(no extra description)'}"
+    )
+    return await generate_json(prompt, system, temperature=0.4)
+
+
 async def suggest_searches(resume_json: str) -> list[dict]:
     system = _load_prompt("suggest_searches")
     prompt = f"## Candidate Resume\n{resume_json}"
+    return await generate_json(prompt, system, temperature=0.5)
+
+
+async def suggest_categories(resume_json: str, profiles_summary: str = "") -> list[dict]:
+    system = _load_prompt("suggest_categories")
+    prompt = f"## Candidate Resume\n{resume_json}"
+    if profiles_summary:
+        prompt += f"\n\n## Existing Search Profiles (align category themes with these)\n{profiles_summary}"
     return await generate_json(prompt, system, temperature=0.5)
 
 

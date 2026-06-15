@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, FileText, Loader2, Download, Sparkles, Trash2, ChevronDown, ChevronUp, Copy, MessageSquare } from 'lucide-react';
+import { ArrowLeft, ExternalLink, FileText, Loader2, Download, Sparkles, Trash2, ChevronDown, ChevronUp, Copy, MessageSquare, Tags } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Badge, MatchScoreBadge, StatusBadge } from '../components/ui/Badge';
+import { Badge, MatchScoreBadge, StatusBadge, CategoryBadge } from '../components/ui/Badge';
 import { useJobStore } from '../stores/jobStore';
 import { useResumeStore } from '../stores/resumeStore';
-import { generateApi, type TailoredResume } from '../services/api';
+import { generateApi, categoryApi, type TailoredResume, type JobCategory } from '../services/api';
 import api from '../services/api';
 import { FollowUpChat } from '../components/FollowUpChat';
 
@@ -34,10 +34,35 @@ export function JobDetail() {
   const [expandedCL, setExpandedCL] = useState<string | null>(null);
   const [showFollowUp, setShowFollowUp] = useState(false);
 
+  // Categories (for manual reassign + apply-with-category-resume)
+  const [categories, setCategories] = useState<JobCategory[]>([]);
+
   useEffect(() => {
     if (id) fetchJob(id);
     fetchResumes();
+    categoryApi.list().then(({ data }) => setCategories(data)).catch(() => {});
   }, [id]);
+
+  const reassignCategory = async (categoryId: string) => {
+    if (!id) return;
+    await api.patch(`/jobs/${id}/category`, { category_id: categoryId || null });
+    fetchJob(id);
+  };
+
+  const exportCategoryResume = async (categoryId: string) => {
+    try {
+      const { data } = await categoryApi.exportLatex(categoryId);
+      const blob = new Blob([data.latex_source], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = data.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`Export failed: ${err?.response?.data?.detail || err.message}`);
+    }
+  };
 
   // Load existing tailored resumes and cover letters
   useEffect(() => {
@@ -212,6 +237,34 @@ export function JobDetail() {
           </Button>
         ))}
       </div>
+
+      {/* Category control */}
+      {categories.length > 0 && (() => {
+        const assigned = categories.find((c) => c.id === currentJob.category_id);
+        return (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Tags size={16} className="text-gray-400" />
+            <span className="text-sm text-gray-500">Category:</span>
+            <CategoryBadge name={currentJob.category_name} color={currentJob.category_color} />
+            <select
+              className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+              value={currentJob.category_id || ''}
+              onChange={(e) => reassignCategory(e.target.value)}
+            >
+              <option value="">(uncategorized)</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {assigned && assigned.has_resume && (
+              <Button size="sm" variant="secondary" onClick={() => exportCategoryResume(assigned.id)}>
+                <Download size={14} className="mr-1" /> Export {assigned.name} resume
+              </Button>
+            )}
+            {assigned && !assigned.has_resume && (
+              <span className="text-xs text-amber-600">No resume generated for this category yet</span>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Job Description + Generated Content */}

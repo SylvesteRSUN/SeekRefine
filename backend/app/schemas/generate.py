@@ -14,6 +14,7 @@ class MatchAnalysisResponse(BaseModel):
     gaps: list[str]
     recommendation: str
     suggested_projects: list[str]
+    category: str | None = None
 
 
 class TailorResumeRequest(BaseModel):
