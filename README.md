@@ -1,6 +1,10 @@
 # SeekRefine
 
-AI-powered job search assistant. Supports multiple LLM providers (Ollama, OpenAI, Claude, Gemini, DeepSeek) to automate LinkedIn job scraping, resume-job matching, resume tailoring, and cover letter generation — all through a web UI.
+AI-powered job search assistant. Supports multiple LLM providers (LMStudio, Ollama, OpenAI, Claude, Gemini, DeepSeek) to automate LinkedIn job scraping, resume-job matching, resume tailoring, and cover letter generation — all through a web UI.
+
+## Screenshot
+
+![SeekRefine Dashboard](images/Snipaste_2026-08-04_21-39-00.png)
 
 ## Features
 
@@ -11,7 +15,7 @@ AI-powered job search assistant. Supports multiple LLM providers (Ollama, OpenAI
 - **Resume Tailoring** — Generates a focused 2-page resume: selects 3-5 most relevant projects, trims irrelevant work experience and skills, rewrites descriptions with job keywords. Tailored versions are saved and viewable per job with LaTeX export.
 - **Cover Letter Generation** — Concise 1-page letters in multiple styles (professional / enthusiastic / concise). Previously generated letters are saved and accessible per job with copy/download.
 - **Job List Sorting** — Sort by match score (default, descending) or by applicant count (ascending). Ignored jobs hidden by default.
-- **Multi-LLM Support** — Switch between Ollama (local), OpenAI, Claude, Gemini, and DeepSeek at runtime from the Dashboard.
+- **Multi-LLM Support** — Switch between LMStudio (local), Ollama (local), OpenAI, Claude, Gemini, and DeepSeek at runtime from the Dashboard. LMStudio + Qwen3.6 is the default local stack.
 
 ## Tech Stack
 
@@ -19,7 +23,7 @@ AI-powered job search assistant. Supports multiple LLM providers (Ollama, OpenAI
 |-------|-----------|
 | Frontend | React 19 + Vite + TailwindCSS v4 |
 | Backend | FastAPI + SQLAlchemy + SQLite |
-| LLM | Ollama / OpenAI / Claude / Gemini / DeepSeek (configurable) |
+| LLM | LMStudio / Ollama / OpenAI / Claude / Gemini / DeepSeek (configurable) |
 | Scraper | Playwright (Chromium) |
 | LaTeX | Jinja2 templates → moderncv `.tex` output |
 
@@ -28,6 +32,7 @@ AI-powered job search assistant. Supports multiple LLM providers (Ollama, OpenAI
 - **Python 3.11+**
 - **Node.js 18+**
 - **At least one LLM provider**:
+  - **LMStudio** (local, free, default): load a model in LMStudio and start its server on `http://localhost:1234/v1`
   - **Ollama** (local, free): `ollama pull qwen3.5:9b`
   - Or an API key for OpenAI / Claude / Gemini / DeepSeek
 - **Playwright browsers** (installed automatically on first run, or manually):
@@ -59,8 +64,14 @@ The script will:
 Create `backend/.env` to override defaults:
 
 ```env
-# LLM Provider: ollama | openai | claude | gemini | deepseek
-SEEKREFINE_LLM_PROVIDER=ollama
+# LLM Provider: lmstudio | ollama | openai | claude | gemini | deepseek
+SEEKREFINE_LLM_PROVIDER=lmstudio
+
+# LMStudio (local, OpenAI-compatible server)
+SEEKREFINE_LMSTUDIO_BASE_URL=http://localhost:1234/v1
+SEEKREFINE_LMSTUDIO_MODEL=mudler/qwen3.6-35b-a3b-apex-gguf/qwen3.6-35b-a3b-apex-i-compact.gguf
+SEEKREFINE_LMSTUDIO_MAX_TOKENS=32768
+SEEKREFINE_LMSTUDIO_TIMEOUT=600
 
 # Ollama (local)
 SEEKREFINE_OLLAMA_MODEL=qwen3.5:9b
@@ -104,7 +115,7 @@ SeekRefine/
 │       │   ├── jobs.py          # Search profiles, scraping, filtering, dedup
 │       │   └── generate.py      # LLM: match analysis, tailor, cover letter, chat
 │       ├── services/            # Business logic
-│       │   ├── llm_service.py   # Multi-provider LLM (Ollama/OpenAI/Claude/Gemini/DeepSeek)
+│       │   ├── llm_service.py   # Multi-provider LLM (LMStudio/Ollama/OpenAI/Claude/Gemini/DeepSeek)
 │       │   ├── scraper.py       # Playwright LinkedIn scraper with filters
 │       │   ├── resume_service.py
 │       │   ├── latex_service.py # JSON → LaTeX (Jinja2)
@@ -123,7 +134,7 @@ SeekRefine/
 
 ## Usage Workflow
 
-1. **Configure LLM** — On the Dashboard, pick your LLM provider and enter API key (or use Ollama locally)
+1. **Configure LLM** — On the Dashboard, pick your LLM provider and enter API key (or use LMStudio / Ollama locally)
 2. **Import your resume** — Paste LaTeX source or upload PDF/Word
 3. **Go to Jobs** — Click "AI Generate" to create search profiles from your resume
 4. **Set filters** — Location, date posted, max applicants, exclude keywords (e.g., "Swedish")
